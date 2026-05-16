@@ -9,7 +9,7 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'robots.txt'],
       manifest: {
-        name: 'Social Jukebox',
+        name: 'SpinDeck',
         short_name: 'Jukebox',
         description: 'Collaborative music queue for parties',
         theme_color: '#6366f1',

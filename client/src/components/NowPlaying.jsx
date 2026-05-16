@@ -1,130 +1,95 @@
 import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../stores/useStore';
+import { VinylDisc, Waveform, EqBars } from './Brand';
 
-// YouTube player reference
+// YouTube player reference (kept at module scope for stability across renders)
 let ytPlayer = null;
 let ytPlayerReady = false;
 
-export default function NowPlaying({ currentTrack, isPlaying, isHost, skipVotes, skipThreshold, hasVotedSkip }) {
+export default function NowPlaying({
+  currentTrack,
+  isPlaying,
+  isHost,
+  skipVotes,
+  skipThreshold,
+  hasVotedSkip,
+}) {
   const controlPlayback = useStore(state => state.controlPlayback);
   const voteSkip = useStore(state => state.voteSkip);
-  const [playerReady, setPlayerReady] = useState(false);
   const [debugInfo, setDebugInfo] = useState('');
+  const [elapsed, setElapsed] = useState(0);     // seconds played (for waveform progress)
+  const [duration, setDuration] = useState(0);   // total seconds
   const containerRef = useRef(null);
-  
-  // Load YouTube IFrame API
+  const tickRef = useRef(null);
+
+  // ── Load YouTube IFrame API (host only) ─────────────
   useEffect(() => {
     if (!isHost) return;
-    
-    console.log('[YouTube] Loading API...');
-    
-    // Check if API already loaded
     if (window.YT && window.YT.Player) {
       console.log('[YouTube] API already loaded');
       return;
     }
-    
-    // Load the IFrame Player API
     const tag = document.createElement('script');
     tag.src = 'https://www.youtube.com/iframe_api';
-    const firstScriptTag = document.getElementsByTagName('script')[0];
-    firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
-    
+    document.head.appendChild(tag);
     window.onYouTubeIframeAPIReady = () => {
       console.log('[YouTube] API Ready');
       setDebugInfo('API Ready');
     };
   }, [isHost]);
-  
-  // Create player when track changes (host only)
+
+  // ── Create / refresh player on track change ─────────
   useEffect(() => {
-    if (!isHost || !currentTrack) {
-      console.log('[YouTube] Skipping player creation', { isHost, hasTrack: !!currentTrack });
-      return;
-    }
-    
+    if (!isHost || !currentTrack) return;
+
     const videoId = currentTrack.videoId || currentTrack.sourceId;
-    console.log('[YouTube] Creating player for:', { videoId, title: currentTrack.title, isPlaying });
-    setDebugInfo(`Loading: ${currentTrack.title}`);
-    
     if (!videoId) {
-      console.error('[YouTube] No videoId found!');
       setDebugInfo('Error: No videoId');
       return;
     }
-    
-    // Wait for API to be ready
-    if (!window.YT || !window.YT.Player) {
-      console.log('[YouTube] Waiting for API...');
-      return;
-    }
-    
-    // Destroy existing player
+    if (!window.YT || !window.YT.Player) return;
+
     if (ytPlayer) {
       ytPlayer.destroy();
       ytPlayer = null;
       ytPlayerReady = false;
     }
-    
-    // Create new player
+
     const playerDiv = document.getElementById('yt-player');
-    if (!playerDiv) {
-      console.log('[YouTube] Player div not found');
-      return;
-    }
-    
+    if (!playerDiv) return;
+
     try {
       ytPlayer = new window.YT.Player('yt-player', {
-        videoId: videoId,
+        videoId,
         playerVars: {
-          autoplay: 1,
-          controls: 0,
-          disablekb: 1,
-          fs: 0,
-          modestbranding: 1,
-          rel: 0,
-          showinfo: 0,
-          iv_load_policy: 3,
-          loop: 0,
-          playsinline: 1
+          autoplay: 1, controls: 0, disablekb: 1, fs: 0, modestbranding: 1,
+          rel: 0, showinfo: 0, iv_load_policy: 3, loop: 0, playsinline: 1,
         },
         events: {
           onReady: () => {
-            console.log('[YouTube] Player ready!');
             ytPlayerReady = true;
-            setPlayerReady(true);
-            setDebugInfo('Playing audio...');
-            // Auto-play when ready (works better with autoplay=1 in playerVars)
-            if (ytPlayer && isPlaying) {
-              ytPlayer.playVideo();
-            }
+            setDebugInfo('Playing audio…');
+            try { setDuration(ytPlayer.getDuration() || 0); } catch {}
+            if (isPlaying) ytPlayer.playVideo();
           },
           onStateChange: (event) => {
-            console.log('[YouTube] State:', event.data);
-            // Sync state changes back to server
             if (event.data === window.YT.PlayerState.ENDED) {
               controlPlayback('next');
             } else if (event.data === window.YT.PlayerState.PLAYING) {
               setDebugInfo('Playing');
-              // Notify server we're playing
-              if (!isPlaying) {
-                controlPlayback('play');
-              }
+              try { setDuration(ytPlayer.getDuration() || 0); } catch {}
+              if (!isPlaying) controlPlayback('play');
             } else if (event.data === window.YT.PlayerState.PAUSED) {
               setDebugInfo('Paused');
-              // Notify server we're paused
-              if (isPlaying) {
-                controlPlayback('pause');
-              }
+              if (isPlaying) controlPlayback('pause');
             }
-          }
-        }
+          },
+        },
       });
     } catch (e) {
-      console.error('[YouTube] Player creation failed:', e);
       setDebugInfo('Error: ' + e.message);
     }
-    
+
     return () => {
       if (ytPlayer) {
         ytPlayer.destroy();
@@ -133,140 +98,265 @@ export default function NowPlaying({ currentTrack, isPlaying, isHost, skipVotes,
       }
     };
   }, [isHost, currentTrack?.videoId, currentTrack?.sourceId]);
-  
-  // Sync play/pause state
+
+  // ── Sync play/pause ─────────────────────────────────
   useEffect(() => {
     if (!isHost || !ytPlayerReady || !ytPlayer) return;
-    
-    if (isPlaying) {
-      ytPlayer.playVideo();
-    } else {
-      ytPlayer.pauseVideo();
-    }
+    if (isPlaying) ytPlayer.playVideo();
+    else ytPlayer.pauseVideo();
   }, [isPlaying, isHost]);
-  
+
+  // ── Tick: track current time for waveform progress ──
+  useEffect(() => {
+    clearInterval(tickRef.current);
+    if (isHost && isPlaying) {
+      tickRef.current = setInterval(() => {
+        try {
+          if (ytPlayer?.getCurrentTime) setElapsed(ytPlayer.getCurrentTime() || 0);
+          if (ytPlayer?.getDuration)    setDuration(ytPlayer.getDuration() || 0);
+        } catch {}
+      }, 500);
+    }
+    return () => clearInterval(tickRef.current);
+  }, [isHost, isPlaying]);
+
+  // ── Empty state ─────────────────────────────────────
   if (!currentTrack) {
     return (
-      <div className="px-4 py-8 text-center">
-        <div className="w-24 h-24 mx-auto mb-4 rounded-full bg-gray-800 flex items-center justify-center">
-          <svg className="w-10 h-10 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
-          </svg>
+      <div className="px-6 py-10 flex flex-col items-center text-center">
+        <div className="opacity-50 mb-4">
+          <VinylDisc size={140} spinning={false} label="EMPTY DECK" />
         </div>
-        <p className="text-gray-400">No song playing</p>
-        <p className="text-gray-500 text-sm mt-1">Add songs to get the party started!</p>
+        <p className="text-tx-md">No track loaded.</p>
+        <p className="text-tx-lo text-sm mt-1">
+          {isHost ? 'Drop the needle — add a song below.' : 'Ask someone to spin a track.'}
+        </p>
       </div>
     );
   }
-  
+
+  const trackDuration = duration || currentTrack.duration || 0;
+  const progress = trackDuration > 0 ? Math.min(elapsed / trackDuration, 1) : 0;
+
+  // Compact-card view for both host AND guest. Host gets transport controls.
   return (
-    <div className="px-4 py-6 bg-gradient-to-b from-primary/10 to-transparent">
-      {/* YouTube Player - hidden by default (audio-only) */}
-      {isHost && currentTrack && (
-        <div className="mb-4">
-          <div id="yt-player" ref={containerRef} className="hidden"></div>
+    <div className="px-4 pt-2">
+      {/* Hidden YouTube player (audio-only) */}
+      {isHost && (
+        <div className="mb-3">
+          <div id="yt-player" ref={containerRef} className="hidden" />
           {debugInfo && (
-            <p className="text-xs text-gray-400 mt-1 text-center">Debug: {debugInfo}</p>
+            <p className="font-mono text-[9px] text-tx-mute tracking-widest text-center">
+              ▸ {debugInfo}
+            </p>
           )}
         </div>
       )}
-      
-      {/* Album Art / Thumbnail */}
-      <div className="relative w-48 h-48 mx-auto mb-4 rounded-xl overflow-hidden shadow-lg">
-        {currentTrack.thumbnail ? (
-          <img 
-            src={currentTrack.thumbnail} 
-            alt={currentTrack.title}
-            className="w-full h-full object-cover"
+
+      <div className="surface surface-glow relative overflow-hidden p-4">
+        {/* Deck header */}
+        <div className="flex justify-between items-center mb-3">
+          <div className="font-mono text-[10px] text-cyan tracking-[0.3em]">
+            ▸ DECK A — NOW SPINNING
+          </div>
+          <EqBars />
+        </div>
+
+        {isHost ? (
+          /* HOST VIEW — Large vinyl + transport */
+          <HostDeck
+            currentTrack={currentTrack}
+            isPlaying={isPlaying}
+            progress={progress}
+            elapsed={elapsed}
+            trackDuration={trackDuration}
+            controlPlayback={controlPlayback}
           />
         ) : (
-          <div className="w-full h-full bg-gray-800 flex items-center justify-center">
-            <svg className="w-12 h-12 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
-            </svg>
-          </div>
+          /* GUEST VIEW — Compact deck + skip vote */
+          <GuestDeck
+            currentTrack={currentTrack}
+            isPlaying={isPlaying}
+            progress={progress}
+            elapsed={elapsed}
+            trackDuration={trackDuration}
+            voteSkip={voteSkip}
+            hasVotedSkip={hasVotedSkip}
+            skipVotes={skipVotes}
+            skipThreshold={skipThreshold}
+          />
         )}
-        
-        {/* Playing indicator */}
-        {isPlaying && (
-          <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
-            <div className="flex gap-1">
-              <div className="w-1 h-4 bg-primary animate-pulse"></div>
-              <div className="w-1 h-6 bg-primary animate-pulse delay-75"></div>
-              <div className="w-1 h-3 bg-primary animate-pulse delay-150"></div>
-            </div>
-          </div>
-        )}
-        
-        {/* YouTube indicator */}
-        <div className="absolute top-2 right-2 px-2 py-1 rounded bg-red-500 text-white text-xs font-medium">
-          YouTube
+
+        {/* Corner LEDs */}
+        <div className="absolute top-3 right-3 flex gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-cyan" style={{ boxShadow: '0 0 8px #00D9FF' }} />
+          <span className="w-1.5 h-1.5 rounded-full bg-primary" style={{ boxShadow: '0 0 8px #A855F7' }} />
+          <span className="w-1.5 h-1.5 rounded-full bg-magenta" style={{ boxShadow: '0 0 8px #FF2D8E' }} />
         </div>
       </div>
-      
-      {/* Track Info */}
-      <div className="text-center mb-4">
-        <h2 className="text-xl font-bold text-white mb-1">{currentTrack.title}</h2>
-        <p className="text-gray-400">{currentTrack.artist}</p>
-      </div>
-      
-      {/* Playback Controls (Host only) */}
-      {isHost && (
-        <div className="flex items-center justify-center gap-4 mb-4">
-          <button
-            onClick={() => controlPlayback('pause')}
-            disabled={!isPlaying}
-            className="w-12 h-12 rounded-full bg-gray-800 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center transition-colors"
-          >
-            <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
-            </svg>
-          </button>
-          
-          <button
-            onClick={() => controlPlayback('play')}
-            disabled={isPlaying}
-            className="w-16 h-16 rounded-full bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center transition-colors"
-          >
-            <svg className="w-8 h-8 text-white ml-1" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M8 5v14l11-7z" />
-            </svg>
-          </button>
-          
-          <button
-            onClick={() => controlPlayback('next')}
-            className="w-12 h-12 rounded-full bg-gray-800 hover:bg-gray-700 flex items-center justify-center transition-colors"
-          >
-            <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
-            </svg>
-          </button>
-        </div>
-      )}
-      
-      {/* Skip Vote (Guests) */}
-      {!isHost && (
-        <div className="flex flex-col items-center">
-          <button
-            onClick={voteSkip}
-            disabled={hasVotedSkip}
-            className={`px-6 py-2 rounded-full font-medium transition-all ${
-              hasVotedSkip 
-                ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                : 'bg-red-500/20 hover:bg-red-500/30 text-red-400'
-            }`}
-          >
-            {hasVotedSkip ? 'Voted' : 'Vote to Skip'}
-          </button>
-        </div>
-      )}
-      
-      {/* Vote count - shown to everyone */}
-      {skipVotes > 0 && (
-        <p className="text-gray-400 text-sm mt-2 text-center">
-          {skipVotes} / {skipThreshold} votes to skip
-        </p>
-      )}
     </div>
   );
+}
+
+/* ─── Host: full deck with vinyl + transport ─────────── */
+function HostDeck({ currentTrack, isPlaying, progress, elapsed, trackDuration, controlPlayback }) {
+  return (
+    <>
+      <div className="relative flex justify-center mb-3.5">
+        <VinylDisc
+          size={196}
+          spinning={isPlaying}
+          art={currentTrack.thumbnail}
+          label={(currentTrack.title || '').slice(0, 12)}
+        />
+        {/* (Optional) BPM badge — left as static decoration */}
+        <div
+          className="absolute top-2 right-2 px-2 py-1.5 rounded-xl text-center"
+          style={{ background: 'rgba(13,8,32,0.85)', border: '1px solid #3A2266' }}
+        >
+          <div
+            className="font-mono text-base font-extrabold text-cyan"
+            style={{ textShadow: '0 0 6px rgba(0,217,255,0.5)' }}
+          >
+            {isPlaying ? '▸' : '⏸'}
+          </div>
+          <div className="font-mono text-[8px] text-tx-lo tracking-[0.15em]">DECK</div>
+        </div>
+      </div>
+
+      <div className="text-center mb-3">
+        <div className="font-display font-bold text-[22px] leading-tight tracking-tight">
+          {currentTrack.title}
+        </div>
+        <div className="text-tx-md text-[13px] mt-0.5">{currentTrack.artist}</div>
+      </div>
+
+      <div className="wave-bg mb-2.5">
+        <Waveform progress={progress} bars={62} />
+        <div className="flex justify-between mt-1.5">
+          <span className="font-mono text-[10px] text-cyan">{fmtTime(elapsed)}</span>
+          <span className="font-mono text-[10px] text-tx-lo">{fmtTime(trackDuration)}</span>
+        </div>
+      </div>
+
+      <div className="flex justify-center items-center gap-4 mt-2">
+        <button
+          onClick={() => controlPlayback('prev')}
+          className="btn-neon btn-ghost btn-circle"
+          style={{ width: 48, height: 48 }}
+          aria-label="Previous"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M6 6h2v12H6zM9.5 12L18 6v12z" />
+          </svg>
+        </button>
+        <button
+          onClick={() => controlPlayback(isPlaying ? 'pause' : 'play')}
+          className="btn-neon btn-primary btn-circle lg"
+          aria-label={isPlaying ? 'Pause' : 'Play'}
+        >
+          {isPlaying ? (
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M6 4h4v16H6zM14 4h4v16h-4z" />
+            </svg>
+          ) : (
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor" style={{ marginLeft: 2 }}>
+              <path d="M8 5v14l11-7z" />
+            </svg>
+          )}
+        </button>
+        <button
+          onClick={() => controlPlayback('next')}
+          className="btn-neon btn-ghost btn-circle"
+          style={{ width: 48, height: 48 }}
+          aria-label="Skip to next"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M6 18l8.5-6L6 6v12zM16 6h2v12h-2z" />
+          </svg>
+        </button>
+      </div>
+    </>
+  );
+}
+
+/* ─── Guest: compact deck + skip vote meter ──────────── */
+function GuestDeck({ currentTrack, isPlaying, progress, elapsed, trackDuration, voteSkip, hasVotedSkip, skipVotes, skipThreshold }) {
+  const pct = skipThreshold > 0 ? Math.min((skipVotes / skipThreshold) * 100, 100) : 0;
+
+  return (
+    <>
+      <div className="flex gap-3 items-center mb-3">
+        <VinylDisc
+          size={92}
+          spinning={isPlaying}
+          art={currentTrack.thumbnail}
+          label={(currentTrack.title || '').slice(0, 8)}
+        />
+        <div className="flex-1 min-w-0">
+          <div className="font-display font-bold text-[17px] leading-tight truncate">
+            {currentTrack.title}
+          </div>
+          <div className="text-tx-md text-xs truncate mb-2">{currentTrack.artist}</div>
+          <Waveform progress={progress} bars={32} />
+          <div className="flex justify-between mt-1">
+            <span className="font-mono text-[9px] text-cyan">{fmtTime(elapsed)}</span>
+            <span className="font-mono text-[9px] text-tx-lo">{fmtTime(trackDuration)}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Skip vote meter */}
+      <div
+        className="flex items-center gap-3 p-3 rounded-2xl"
+        style={{ background: 'rgba(13,8,32,0.5)', border: '1px solid #3A2266' }}
+      >
+        <div
+          className="flex items-center justify-center w-10 h-10 rounded-xl text-magenta"
+          style={{
+            background: 'rgba(255,45,142,0.1)',
+            border: '1px solid rgba(255,45,142,0.3)',
+          }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M13 19l9-7-9-7v14zM2 19l9-7-9-7v14z" />
+          </svg>
+        </div>
+        <div className="flex-1">
+          <div className="text-[13px] font-semibold">
+            {hasVotedSkip ? 'Vote registered' : 'Vote to skip'}
+          </div>
+          <div className="font-mono text-[10px] text-tx-lo tracking-[0.15em] mt-0.5">
+            {skipVotes} / {skipThreshold} · MAJORITY RULES
+          </div>
+          <div className="h-1 rounded mt-1.5 overflow-hidden" style={{ background: 'rgba(58,34,102,0.5)' }}>
+            <div
+              className="h-full"
+              style={{
+                width: `${pct}%`,
+                background: 'linear-gradient(90deg, #FF2D8E, #C026D3)',
+                boxShadow: '0 0 8px #FF2D8E',
+                transition: 'width 0.4s ease',
+              }}
+            />
+          </div>
+        </div>
+        <button
+          onClick={voteSkip}
+          disabled={hasVotedSkip}
+          className={'btn-neon ' + (hasVotedSkip ? 'btn-ghost' : 'btn-magenta')}
+          style={{ padding: '10px 14px', fontSize: 11 }}
+        >
+          {hasVotedSkip ? 'Voted' : 'Skip'}
+        </button>
+      </div>
+    </>
+  );
+}
+
+function fmtTime(seconds) {
+  if (!seconds || !isFinite(seconds)) return '0:00';
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
 }

@@ -1,107 +1,54 @@
-# Social Jukebox 🎵
+# SpinDeck — DJ-deck redesign drop-in
 
-A collaborative music queue PWA where hosts create rooms with PIN codes and guests join to add songs to a shared queue. Built with React, Node.js, Fastify, and WebSockets.
+These files port the design from `SpinDeck Redesign.html` into your actual repo
+(`client/` of `github.com/CodeByMAB/spindeck`). All store hooks, WebSocket
+plumbing, and prop signatures are preserved — only the JSX + styles change.
 
-## Features
+## Files in this folder
 
-- **Room Creation** - Hosts create rooms and get a 4-digit PIN (like Jack Box games)
-- **PIN-based Joining** - Guests join by entering the room PIN
-- **YouTube Search** - Search and add songs from YouTube
-- **Real-time Sync** - Queue and playback state sync across all devices via WebSocket
-- **FIFO Queue** - Songs play in order
-- **Skip Voting** - Guests can vote to skip (majority wins)
-- **Auto Host Transfer** - If host leaves, most active user becomes host
-- **PWA** - Installable on mobile devices
+```
+repo/client/
+├── index.html                    # adds Google Fonts (Space Grotesk + JetBrains Mono + Inter)
+├── tailwind.config.js            # new neon palette + brand fonts + animations
+└── src/
+    ├── index.css                 # SpinDeck custom layer (vinyl, PIN cells, neon buttons, waveform…)
+    └── components/
+        ├── Brand.jsx             # NEW — Wordmark, VinylDisc, Waveform, PinDisplay, EqBars
+        ├── HomeScreen.jsx
+        ├── CreateRoomScreen.jsx
+        ├── JoinRoomScreen.jsx    # now with numpad PIN entry
+        ├── RoomScreen.jsx
+        ├── NowPlaying.jsx        # split into HostDeck (vinyl + transport) + GuestDeck (skip meter)
+        ├── QueueList.jsx
+        ├── SearchModal.jsx
+        └── UserList.jsx
+```
 
-## Quick Start
-
-### Prerequisites
-
-- Node.js 18+
-- YouTube Data API v3 key (free from Google Cloud Console)
-
-### Setup
-
-1. **Clone and install dependencies:**
+## To apply
 
 ```bash
-# Server
-cd server
-cp .env.example .env
-# Edit .env with your YouTube API key
-npm install
-
-# Client
-cd ../client
-npm install
+# from your repo root
+cp -r /path/to/repo/client/* ./client/
 ```
 
-2. **Get YouTube API Key:**
-   - Go to [Google Cloud Console](https://console.cloud.google.com/)
-   - Create a project
-   - Enable YouTube Data API v3
-   - Create credentials (API Key)
-   - Add to `server/.env`
+No new dependencies. Tailwind already in your stack picks up the new tokens
+from `tailwind.config.js`.
 
-### Run Development
+The Google Fonts link in `index.html` loads three families:
+- **Space Grotesk** — display headings
+- **JetBrains Mono** — PIN cells, BPM, timecodes
+- **Inter** — body
 
-```bash
-# Terminal 1 - Server
-cd server
-npm run dev
+## What changed structurally
 
-# Terminal 2 - Client  
-cd client
-npm run dev
-```
+- `App.jsx`, `stores/useStore.js` — **unchanged**, no edits needed.
+- `Brand.jsx` is new. All screens import shared primitives from it.
+- `NowPlaying.jsx` is now ~split: `<HostDeck>` (large vinyl + transport + waveform) and `<GuestDeck>` (compact deck + animated skip-vote meter). The hidden YouTube IFrame still drives audio — added a 500ms tick to update `elapsed` so the waveform fills in real time.
+- `JoinRoomScreen.jsx` ditches the text input for a proper numpad — keeps the same `joinRoom(pin)` call.
 
-- Server: http://localhost:3001
-- Client: http://localhost:5173
+## Notes / next steps
 
-### Build for Production
-
-```bash
-cd client
-npm run build
-```
-
-The built PWA will be in `client/dist/`
-
-## Architecture
-
-```
-┌─────────────────────┐     WebSocket      ┌─────────────────────┐
-│   React PWA Client │◄──────────────────►│   Node.js Server    │
-│   - Zustand Store  │     (ws://:3001)    │   - Fastify         │
-│   - Tailwind CSS   │                    │   - Room Manager    │
-│   - PWA Plugin     │                    │   - YouTube API     │
-└─────────────────────┘                    └─────────────────────┘
-```
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|------------|
-| Frontend | React 18, Vite, Zustand, Tailwind CSS, Vite PWA |
-| Backend | Node.js, Fastify, @fastify/websocket |
-| Real-time | WebSocket |
-| Music Source | YouTube Data API v3 |
-
-## MVP Limitations
-
-- Only YouTube (audio-first)
-- Max 5 users per room
-- In-memory room storage (rooms lost on server restart)
-- No persistent user accounts
-
-## Future Features (Post-MVP)
-
-- Spotify, Apple Music, Amazon Music integrations
-- "Cast from phone" hybrid model
-- Shared room login
-- Bluetooth proximity joining
-- DJ mode with turntable
-
-## License
-
-MIT
+- The vinyl rotates while `isPlaying`. Album art (`track.thumbnail`) drops into the center label cleanly; if it's missing you get a striped placeholder with the track name in monospace.
+- `track.addedBy` shows as a chip on each queue row — if your server doesn't emit that, the chip simply doesn't render. Add the field server-side to light it up.
+- BPM badge in the host deck is currently a static play/pause indicator. Wire it to a real BPM source if/when you add audio analysis.
+- The "Share Link" button uses `navigator.share` with `navigator.clipboard` as fallback.

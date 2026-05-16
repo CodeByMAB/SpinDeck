@@ -3,85 +3,115 @@ import { useStore } from '../stores/useStore';
 export default function UserList({ onClose }) {
   const room = useStore(state => state.room);
   const user = useStore(state => state.user);
-  
+
   const users = room?.users || [];
-  const host = users.find(u => u.isHost);
-  
+
   return (
     <div>
+      {/* Header */}
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-white">In Room</h2>
+        <div>
+          <div className="font-mono text-[10px] text-tx-lo tracking-[0.25em]">
+            ▸ ON THE FLOOR
+          </div>
+          <h2 className="font-display font-bold text-lg mt-0.5">In the Room</h2>
+        </div>
         <button
           onClick={onClose}
-          className="p-2 rounded-lg hover:bg-gray-800 transition-colors"
+          aria-label="Close"
+          className="w-8 h-8 rounded-xl flex items-center justify-center text-tx-md hover:text-tx-hi hover:bg-ink-200/60 transition-colors"
         >
-          <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
       </div>
-      
+
       {users.length === 0 ? (
-        <p className="text-gray-500 text-center py-4">No users in room</p>
+        <p className="text-tx-md text-center py-6">No-one's on the floor yet.</p>
       ) : (
-        <div className="space-y-2">
-          {users.map(u => (
-            <div 
-              key={u.id}
-              className={`flex items-center gap-3 p-3 rounded-xl ${
-                u.id === user?.id ? 'bg-primary/20' : 'bg-gray-800/50'
-              }`}
-            >
-              {/* Avatar */}
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                u.isHost ? 'bg-primary/30 text-primary' : 'bg-gray-700 text-gray-400'
-              }`}>
-                {u.isHost ? (
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-                  </svg>
-                ) : (
-                  <span className="text-lg font-medium">
-                    {u.username.charAt(0).toUpperCase()}
-                  </span>
-                )}
+        <div className="flex flex-col gap-2">
+          {users.map((u) => {
+            const isYou = u.id === user?.id;
+            const tag = (u.username || '?').charAt(0).toUpperCase();
+            return (
+              <div
+                key={u.id}
+                className={
+                  'flex items-center gap-3 p-3 rounded-2xl border ' +
+                  (isYou
+                    ? 'bg-primary/10'
+                    : 'bg-ink-200/40')
+                }
+                style={{
+                  borderColor: isYou ? 'rgba(168,85,247,0.5)' : 'rgba(58,34,102,0.6)',
+                  ...(isYou
+                    ? { boxShadow: '0 0 24px rgba(168,85,247,0.12)' }
+                    : null),
+                }}
+              >
+                {/* Avatar */}
+                <div
+                  className="w-10 h-10 rounded-xl flex items-center justify-center font-display font-bold text-base flex-shrink-0"
+                  style={{
+                    background: u.isHost
+                      ? 'linear-gradient(135deg, #A855F7, #00D9FF)'
+                      : 'linear-gradient(135deg, #1E1138, #160B2A)',
+                    color: u.isHost ? '#04101A' : '#F7F2FF',
+                    border: u.isHost ? 'none' : '1px solid #3A2266',
+                  }}
+                >
+                  {tag}
+                </div>
+
+                {/* Name */}
+                <div className="flex-1 min-w-0">
+                  <div className="font-display font-semibold text-sm truncate">
+                    {u.username}
+                    {isYou && (
+                      <span className="text-tx-lo text-xs ml-1.5 font-normal">(you)</span>
+                    )}
+                  </div>
+                  <div className="font-mono text-[10px] tracking-[0.15em] mt-0.5"
+                       style={{ color: u.isHost ? '#FF2D8E' : '#6B5A8E' }}>
+                    {u.isHost ? 'HOST · ON THE DECK' : 'ON THE FLOOR'}
+                  </div>
+                </div>
+
+                {/* Role chip */}
+                {u.isHost && <div className="chip magenta">HOST</div>}
               </div>
-              
-              {/* Name & Role */}
-              <div className="flex-1">
-                <p className="font-medium text-white">
-                  {u.username}
-                  {u.id === user?.id && (
-                    <span className="text-gray-400 text-sm ml-2">(you)</span>
-                  )}
-                </p>
-                <p className="text-gray-500 text-sm">
-                  {u.isHost ? 'Host' : 'Guest'}
-                </p>
-              </div>
-              
-              {/* Host Badge */}
-              {u.isHost && (
-                <span className="px-2 py-1 rounded-full bg-primary/30 text-primary text-xs font-medium">
-                  HOST
-                </span>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
-      
-      {/* Room Info */}
-      <div className="mt-6 pt-4 border-t border-gray-800">
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-gray-500">Room PIN</span>
-          <span className="text-white font-mono text-lg">{room?.pin}</span>
-        </div>
-        <div className="flex items-center justify-between text-sm mt-2">
-          <span className="text-gray-500">Max Guests</span>
-          <span className="text-white">{room?.settings?.maxUsers || 5}</span>
-        </div>
+
+      {/* Room meta */}
+      <div className="mt-6 pt-4 border-t border-line/60">
+        <Row label="ROOM PIN">
+          <span
+            className="font-mono text-base font-extrabold text-cyan tracking-[0.1em]"
+            style={{ textShadow: '0 0 8px rgba(0,217,255,0.6)' }}
+          >
+            {room?.pin}
+          </span>
+        </Row>
+        <Row label="MAX FLOOR">
+          <span className="font-mono text-sm text-tx-hi">{room?.settings?.maxUsers || 5}</span>
+        </Row>
+        <Row label="LIVE">
+          <span className="chip live">ON AIR</span>
+        </Row>
       </div>
+    </div>
+  );
+}
+
+function Row({ label, children }) {
+  return (
+    <div className="flex items-center justify-between py-1.5">
+      <span className="font-mono text-[10px] text-tx-lo tracking-[0.25em]">{label}</span>
+      {children}
     </div>
   );
 }

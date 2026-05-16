@@ -1,61 +1,89 @@
 import { useStore } from '../stores/useStore';
+import { Wordmark, VinylDisc } from './Brand';
 
 export default function HomeScreen({ onCreate, onJoin }) {
   const username = useStore(state => state.username);
   const setUsername = useStore(state => state.setUsername);
-  
+
+  const canProceed = !!username.trim();
+
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-gradient-to-b from-darker to-dark">
-      <div className="w-full max-w-sm">
-        {/* Logo / Title */}
-        <div className="text-center mb-10">
-          <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-primary/20 flex items-center justify-center pulse-glow">
-            <svg className="w-10 h-10 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
-            </svg>
-          </div>
-          <h1 className="text-3xl font-bold text-white mb-2">Social Jukebox</h1>
-          <p className="text-gray-400">Collaborative music for everyone</p>
+    <div className="sd-bg min-h-screen flex flex-col">
+      {/* Header */}
+      <div className="flex items-center justify-between px-5 pt-12 pb-2">
+        <Wordmark size={28} />
+        <div className="chip purple">v1.0 · PWA</div>
+      </div>
+
+      {/* Hero */}
+      <div className="flex-1 flex flex-col items-center justify-center px-6">
+        <div className="relative mb-9">
+          <VinylDisc size={220} spinning label="DROP THE NEEDLE" />
+          <div className="beat-ring absolute -inset-2.5 pointer-events-none" />
         </div>
-        
-        {/* Username Input */}
-        <div className="mb-8">
-          <label className="block text-sm font-medium text-gray-300 mb-2">
-            Your Name
-          </label>
-          <input
-            type="text"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="Enter your name"
-            className="w-full px-4 py-3 rounded-xl bg-dark border border-gray-700 text-white placeholder-gray-500 focus:outline-none focus:border-primary transition-colors"
-            maxLength={20}
-          />
-        </div>
-        
-        {/* Action Buttons */}
-        <div className="space-y-4">
-          <button
-            onClick={onCreate}
-            disabled={!username.trim()}
-            className="w-full py-4 px-6 rounded-xl bg-primary hover:bg-primary/90 disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-semibold transition-all transform hover:scale-[1.02] active:scale-[0.98]"
+
+        <h1 className="font-display font-bold text-center leading-none text-[36px] tracking-tight mb-2.5">
+          The floor<br />
+          <span
+            className="bg-clip-text text-transparent"
+            style={{
+              backgroundImage:
+                'linear-gradient(90deg, #00D9FF, #A855F7, #FF2D8E)',
+            }}
           >
-            Create Room 🎵
-          </button>
-          
-          <button
-            onClick={onJoin}
-            disabled={!username.trim()}
-            className="w-full py-4 px-6 rounded-xl bg-dark border border-gray-700 hover:border-gray-600 disabled:border-gray-800 disabled:cursor-not-allowed text-white font-semibold transition-all"
-          >
-            Join Room 🔗
-          </button>
-        </div>
-        
-        {/* Footer */}
-        <p className="mt-8 text-center text-gray-500 text-sm">
-          Connect your phone to play music through the room
+            writes the set.
+          </span>
+        </h1>
+        <p className="text-tx-md text-sm text-center max-w-[280px] leading-snug">
+          A shared queue for any room.<br />
+          Host spins. Crowd requests.
         </p>
+      </div>
+
+      {/* DJ tag input */}
+      <div className="px-5">
+        <div className="font-mono text-[10px] text-tx-lo tracking-[0.2em] mb-1.5">
+          YOUR DJ TAG
+        </div>
+        <input
+          type="text"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          placeholder="What should we call you?"
+          maxLength={20}
+          className="sd-input"
+        />
+      </div>
+
+      {/* CTAs */}
+      <div className="px-5 pt-4 pb-8 flex flex-col gap-3">
+        <button
+          onClick={onCreate}
+          disabled={!canProceed}
+          className="btn-neon btn-primary w-full"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z" />
+          </svg>
+          Spin Up a Room
+        </button>
+
+        <button
+          onClick={onJoin}
+          disabled={!canProceed}
+          className="btn-neon btn-ghost w-full"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2" />
+            <circle cx="9" cy="7" r="4" />
+            <path d="M22 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />
+          </svg>
+          Join with PIN
+        </button>
+
+        <div className="font-mono text-[10px] text-tx-mute text-center tracking-[0.2em] mt-1">
+          NO ACCOUNT · NO COST · NO ADS
+        </div>
       </div>
     </div>
   );

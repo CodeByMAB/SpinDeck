@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useStore } from '../stores/useStore';
+import { Wordmark, PinDisplay } from './Brand';
 
 export default function JoinRoomScreen({ onBack }) {
   const [pin, setPin] = useState('');
@@ -9,87 +10,136 @@ export default function JoinRoomScreen({ onBack }) {
   const isLoading = useStore(state => state.isLoading);
   const roomError = useStore(state => state.roomError);
   const isConnected = useStore(state => state.isConnected);
-  
-  // Connect WebSocket when entering room
+
   useEffect(() => {
     if (room && !isConnected) {
       console.log('[JoinRoomScreen] Room joined, connecting WebSocket...');
       connectWebSocket();
     }
   }, [room, isConnected]);
-  
+
   const handleJoin = async () => {
-    await joinRoom(pin);
+    if (pin.length === 4) await joinRoom(pin);
   };
-  
-  const handleKeyPress = (e) => {
-    if (e.key === 'Enter') {
-      handleJoin();
+
+  const press = (key) => {
+    if (key === '⌫') {
+      setPin(p => p.slice(0, -1));
+    } else if (pin.length < 4 && /^\d$/.test(key)) {
+      setPin(p => p + key);
     }
   };
-  
-  if (room) {
-    return null; // App will redirect to RoomScreen
-  }
-  
+
   return (
-    <div className="min-h-screen flex flex-col p-6 bg-darker">
-      {/* Header */}
-      <div className="flex items-center mb-8">
+    <div className="sd-bg min-h-screen flex flex-col">
+      {/* Top bar */}
+      <div className="flex items-center justify-between px-5 pt-12 pb-2">
         <button
           onClick={onBack}
-          className="p-2 -ml-2 rounded-lg hover:bg-gray-800 transition-colors"
+          className="flex items-center gap-1.5 text-tx-md text-sm hover:text-tx-hi transition-colors"
         >
-          <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M19 12H5M12 19l-7-7 7-7" />
           </svg>
+          Back
         </button>
-        <h1 className="text-xl font-semibold text-white ml-2">Join Room</h1>
+        <Wordmark size={22} />
+        <div className="w-10" />
       </div>
-      
-      <div className="flex-1 flex flex-col items-center justify-center">
-        <p className="text-gray-400 mb-6 text-center">
-          Enter the 4-digit PIN<br/>from the host to join
-        </p>
-        
-        {roomError && (
-          <div className="mb-4 p-3 rounded-lg bg-red-500/20 border border-red-500/50 text-red-300 text-sm">
-            {roomError}
-          </div>
-        )}
-        
-        {/* PIN Input */}
-        <div className="mb-6">
-          <input
-            type="text"
-            value={pin}
-            onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-            onKeyPress={handleKeyPress}
-            placeholder="0000"
-            className="w-32 text-center text-4xl font-bold tracking-[0.5em] py-3 rounded-xl bg-dark border border-gray-700 text-white placeholder-gray-600 focus:outline-none focus:border-primary transition-colors"
-            maxLength={4}
-            inputMode="numeric"
-            autoFocus
-          />
+
+      {/* Heading */}
+      <div className="px-6 pt-7 pb-3">
+        <div
+          className="font-mono text-[11px] text-magenta tracking-[0.3em]"
+          style={{ textShadow: '0 0 8px rgba(255,45,142,0.5)' }}
+        >
+          // INCOMING TRANSMISSION
         </div>
-        
+        <div className="font-display font-bold text-[32px] leading-[1.05] tracking-tight mt-1.5">
+          Drop in.<br />
+          <span
+            className="bg-clip-text text-transparent"
+            style={{
+              backgroundImage: 'linear-gradient(90deg, #00D9FF, #FF2D8E)',
+            }}
+          >
+            Punch the PIN.
+          </span>
+        </div>
+      </div>
+
+      {roomError && (
+        <div className="mx-5 mt-2 p-3 rounded-xl bg-magenta/10 border border-magenta/40 text-magenta text-sm font-mono tracking-wider">
+          ERR · {roomError}
+        </div>
+      )}
+
+      {/* PIN display */}
+      <div className="px-4 pt-5 pb-1">
+        <PinDisplay pin={pin} size="lg" />
+        <div className="font-mono text-center text-[10px] text-tx-lo tracking-[0.25em] mt-3.5">
+          4-DIGIT ROOM CODE
+        </div>
+      </div>
+
+      {/* Numpad */}
+      <div className="px-8 pt-5 grid grid-cols-3 gap-3">
+        {['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', '⌫'].map((k, i) => (
+          <button
+            key={i}
+            disabled={k === ''}
+            onClick={() => press(k)}
+            className="rounded-2xl font-mono font-bold transition active:scale-95 disabled:opacity-0"
+            style={{
+              height: 60,
+              fontSize: 22,
+              color: k === '⌫' ? '#FF2D8E' : '#F7F2FF',
+              background: k === '' ? 'transparent'
+                : k === '⌫' ? 'rgba(255,45,142,0.08)'
+                : 'rgba(26,12,46,0.6)',
+              border: k === '' ? 'none'
+                : k === '⌫' ? '1px solid rgba(255,45,142,0.3)'
+                : '1px solid #3A2266',
+            }}
+          >
+            {k}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex-1" />
+
+      {/* CTA */}
+      <div className="px-5 pt-3 pb-8">
         <button
           onClick={handleJoin}
           disabled={isLoading || pin.length !== 4}
-          className="w-full max-w-sm py-4 px-6 rounded-xl bg-primary hover:bg-primary/90 disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-semibold transition-all"
+          className="btn-neon btn-cyan w-full"
         >
           {isLoading ? (
-            <span className="flex items-center justify-center gap-2">
-              <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            <>
+              <svg className="animate-spin" width="18" height="18" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" fill="none" opacity="0.25" />
+                <path fill="currentColor" opacity="0.85" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z" />
               </svg>
-              Joining...
-            </span>
+              Connecting…
+            </>
           ) : (
-            'Join Room'
+            <>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <circle cx="12" cy="12" r="10" />
+                <circle cx="12" cy="12" r="4" />
+                <circle cx="12" cy="12" r="1.2" fill="currentColor" />
+              </svg>
+              Hit the Decks
+            </>
           )}
         </button>
+        {pin.length < 4 && (
+          <p className="font-mono text-center text-[10px] text-tx-mute tracking-[0.18em] mt-2.5">
+            ENTER {4 - pin.length} MORE DIGIT{4 - pin.length === 1 ? '' : 'S'}…
+          </p>
+        )}
       </div>
     </div>
   );
