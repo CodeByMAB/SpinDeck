@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-const API_BASE = ''; // Proxied through Vite dev server
+const API_BASE = ''; // Same origin (server serves client + API)
 
 // localStorage keys
 const STORAGE_KEYS = {

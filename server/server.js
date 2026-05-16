@@ -1,8 +1,14 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
+import fastifyStatic from '@fastify/static';
 import { v4 as uuidv4 } from 'uuid';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import 'dotenv/config';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const fastify = Fastify({ logger: true });
 
@@ -12,6 +18,17 @@ await fastify.register(cors, {
   methods: ['GET', 'POST', 'DELETE']
 });
 await fastify.register(websocket);
+
+// Serve static client files
+await fastify.register(fastifyStatic, {
+  root: path.join(__dirname, '../client/dist'),
+  prefix: '/',
+});
+
+// Fallback to index.html for SPA routing
+await fastify.setNotFoundHandler((request, reply) => {
+  reply.sendFile('index.html');
+});
 
 // In-memory storage (MVP)
 const rooms = new Map();
@@ -522,8 +539,8 @@ fastify.register(async function (fastify) {
 // Start server
 const start = async () => {
   try {
-    await fastify.listen({ port: 3001, host: '0.0.0.0' });
-    console.log('Server running on http://localhost:3001');
+    await fastify.listen({ port: 3000, host: '0.0.0.0' });
+    console.log('Server running on http://localhost:3000');
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
