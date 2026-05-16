@@ -359,10 +359,6 @@ fastify.register(async function (fastify) {
                 skipVotes: 0,
                 skipThreshold: Math.ceil(room.users.length * room.settings.skipThreshold)
               });
-                isPlaying: room.isPlaying,
-                skipVotes: 0,
-                skipThreshold: Math.ceil(room.users.length * room.settings.skipThreshold)
-              });
             }
             break;
           }

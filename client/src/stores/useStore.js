@@ -219,9 +219,14 @@ export const useStore = create((set, get) => ({
       
       switch (eventType) {
         case 'room:state': {
+          // Defensive: if room is null/undefined, don't update (prevents blank screen)
+          if (!data.room) {
+            console.warn('[WS] room:state received with null room, ignoring');
+            break;
+          }
           set({
             room: data.room,
-            queue: data.queue,
+            queue: data.queue || [],
             currentTrack: data.currentTrack,
             isPlaying: data.isPlaying,
             skipVotes: data.skipVotes,
