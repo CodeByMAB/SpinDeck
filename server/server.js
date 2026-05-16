@@ -335,8 +335,13 @@ fastify.register(async function (fastify) {
               room.isPlaying = true;
               room.skipVotes.clear();
               
-              broadcastToRoom(currentRoomId, 'playback:state', {
+              broadcastToRoom(currentRoomId, 'room:state', {
+                room: { ...room, skipVotes: undefined },
                 currentTrack: room.currentTrack,
+                isPlaying: room.isPlaying,
+                skipVotes: 0,
+                skipThreshold: Math.ceil(room.users.length * room.settings.skipThreshold)
+              });
                 isPlaying: room.isPlaying,
                 skipVotes: 0,
                 skipThreshold: Math.ceil(room.users.length * room.settings.skipThreshold)
@@ -375,8 +380,9 @@ fastify.register(async function (fastify) {
                 // Reset skip votes for all users
                 room.users.forEach(u => u.hasVotedSkip = false);
 
-                broadcastToRoom(currentRoomId, 'queue:updated', { queue: room.queue });
-                broadcastToRoom(currentRoomId, 'playback:state', {
+                broadcastToRoom(currentRoomId, 'room:state', {
+                  room: { ...room, skipVotes: undefined },
+                  queue: room.queue,
                   currentTrack: room.currentTrack,
                   isPlaying: room.isPlaying,
                   skipVotes: 0,
@@ -400,7 +406,8 @@ fastify.register(async function (fastify) {
 
             if (action === 'play' || action === 'pause') {
               room.isPlaying = action === 'play';
-              broadcastToRoom(currentRoomId, 'playback:state', {
+              broadcastToRoom(currentRoomId, 'room:state', {
+                room: { ...room, skipVotes: undefined },
                 currentTrack: room.currentTrack,
                 isPlaying: room.isPlaying,
                 skipVotes: room.skipVotes.size,
@@ -415,8 +422,9 @@ fastify.register(async function (fastify) {
               // Reset skip votes for all users
               room.users.forEach(u => u.hasVotedSkip = false);
 
-              broadcastToRoom(currentRoomId, 'queue:updated', { queue: room.queue });
-              broadcastToRoom(currentRoomId, 'playback:state', {
+              broadcastToRoom(currentRoomId, 'room:state', {
+                room: { ...room, skipVotes: undefined },
+                queue: room.queue,
                 currentTrack: room.currentTrack,
                 isPlaying: room.isPlaying,
                 skipVotes: 0,

@@ -109,7 +109,8 @@ export default function NowPlaying({
   // ── Tick: track current time for waveform progress ──
   useEffect(() => {
     clearInterval(tickRef.current);
-    if (isHost && isPlaying) {
+    // Only run tick if we have a valid track and are actually playing
+    if (isHost && isPlaying && currentTrack && ytPlayer) {
       tickRef.current = setInterval(() => {
         try {
           if (ytPlayer?.getCurrentTime) setElapsed(ytPlayer.getCurrentTime() || 0);
@@ -118,7 +119,7 @@ export default function NowPlaying({
       }, 500);
     }
     return () => clearInterval(tickRef.current);
-  }, [isHost, isPlaying]);
+  }, [isHost, isPlaying, currentTrack]);
 
   // ── Empty state ─────────────────────────────────────
   if (!currentTrack) {
