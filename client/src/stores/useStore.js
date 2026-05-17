@@ -104,22 +104,23 @@ export const useStore = create((set, get) => ({
         return false;
       }
       
-      set({ 
-        room: data.room, 
+      set({
+        room: data.room,
         user: data.user,
-        isLoading: false 
+        isLoading: false
       });
-      
+
       // Persist to localStorage
-      saveToStorage(data.room, data.room, get().username);
-      
+      saveToStorage(data.user, data.room, get().username);
+
+      get().connectWebSocket();
       return true;
     } catch (error) {
       set({ roomError: 'Connection failed', isLoading: false });
       return false;
     }
   },
-  
+
   joinRoom: async (pin) => {
     const { username } = get();
     if (!username.trim()) {
@@ -159,47 +160,61 @@ export const useStore = create((set, get) => ({
         return false;
       }
       
-      set({ 
-        room: data.room, 
+      set({
+        room: data.room,
         user: data.user,
-        isLoading: false 
+        isLoading: false
       });
-      
+
       // Persist to localStorage
       saveToStorage(data.user, data.room, get().username);
-      
+
+      get().connectWebSocket();
       return true;
     } catch (error) {
       set({ roomError: 'Connection failed', isLoading: false });
       return false;
     }
   },
-  
+
   leaveRoom: () => {
-    set({ 
-      room: null, 
+    // Close any open WS so stale connections don't block future room joins
+    const { ws } = get();
+    if (ws) {
+      try { ws.close(); } catch {}
+    }
+
+    set({
+      room: null,
       user: null,
+      ws: null,
+      isConnected: false,
       queue: [],
       currentTrack: null,
       isPlaying: false,
       skipVotes: 0,
       hasVotedSkip: false
     });
-    
-    // Clear localStorage
+
     saveToStorage(null, null, get().username);
   },
   
   connectWebSocket: () => {
-    const { room, user } = get();
+    const { room, user, ws: existingWs } = get();
     console.log('[connectWebSocket] Starting...', { room: !!room, user: !!user });
     if (!room || !user) {
       console.error('[connectWebSocket] Missing room or user');
       return;
     }
+    // Bail out if already connected or in the process of connecting
+    if (existingWs && (existingWs.readyState === WebSocket.OPEN || existingWs.readyState === WebSocket.CONNECTING)) {
+      console.log('[connectWebSocket] Already connected/connecting, skipping');
+      return;
+    }
     
-    // Use same host as current page - Vite proxy will forward to server
-    const wsUrl = `ws://${window.location.host}/ws`;
+    // Use same host as current page; match ws/wss to the page protocol
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
     console.log('[connectWebSocket] Connecting to:', wsUrl);
     
     const ws = new WebSocket(wsUrl);
@@ -299,8 +314,17 @@ export const useStore = create((set, get) => ({
           break;
         }
         
+        case 'room:closed': {
+          console.warn('[WS] Room was closed by host');
+          get().leaveRoom();
+          break;
+        }
+
         case 'error': {
           console.error('[WS] Server error:', data.message);
+          if (data.message === 'Room not found') {
+            get().leaveRoom();
+          }
           break;
         }
       }
@@ -329,49 +353,37 @@ export const useStore = create((set, get) => ({
   
   addToQueue: (track) => {
     const { ws, user } = get();
-    console.log('[addToQueue] called', { track, ws: !!ws, user: !!user });
     if (!ws || !user) {
-      console.error('[addToQueue] No WebSocket or user', { wsReadyState: ws?.readyState });
+      console.error('[addToQueue] No WebSocket or user');
       return;
     }
-    
-    const payload = {
+    if (ws.readyState !== WebSocket.OPEN) {
+      console.error('[addToQueue] WebSocket not open, readyState:', ws.readyState);
+      return;
+    }
+
+    ws.send(JSON.stringify({
       event: 'queue:add',
       data: { track: { ...track, addedBy: user.id, addedByName: user.username } }
-    };
-    console.log('[addToQueue] Sending:', payload);
-    ws.send(JSON.stringify(payload));
+    }));
   },
   
   removeFromQueue: (trackId) => {
     const { ws } = get();
-    if (!ws) return;
-    
-    ws.send(JSON.stringify({
-      event: 'queue:remove',
-      data: { trackId }
-    }));
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ event: 'queue:remove', data: { trackId } }));
   },
-  
+
   controlPlayback: (action) => {
     const { ws } = get();
-    if (!ws) return;
-    
-    ws.send(JSON.stringify({
-      event: 'playback:control',
-      data: { action }
-    }));
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ event: 'playback:control', data: { action } }));
   },
-  
+
   voteSkip: () => {
     const { ws, hasVotedSkip } = get();
-    if (!ws || hasVotedSkip) return;
-    
-    ws.send(JSON.stringify({
-      event: 'playback:control',
-      data: { action: 'skip' }
-    }));
-    
+    if (!ws || hasVotedSkip || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ event: 'playback:control', data: { action: 'skip' } }));
     set({ hasVotedSkip: true });
   },
   

@@ -123,6 +123,10 @@ body {
       0 8px 24px rgba(0,0,0,0.5);
   }
   .pin-cell.empty { color: #3F3060; text-shadow: none; }
+  .pin-cell.spinning { 
+    animation: slot-spin 0.08s linear infinite;
+    filter: blur(0.5px);
+  }
   .pin-cell::before {
     content: ""; position: absolute; inset: 0; pointer-events: none;
     background: repeating-linear-gradient(0deg, rgba(0,217,255,0.06) 0 1px, transparent 1px 3px);

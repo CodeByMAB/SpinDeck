@@ -1,31 +1,21 @@
-import { useEffect } from 'react';
 import { useStore } from '../stores/useStore';
-import { Wordmark, PinDisplay, EqBars } from './Brand';
+import { Wordmark, EqBars } from './Brand';
+import { SlotMachine } from './SlotMachine';
+import { PinQRCode } from './PinQRCode';
 
 export default function CreateRoomScreen({ onBack }) {
   const createRoom = useStore(state => state.createRoom);
-  const connectWebSocket = useStore(state => state.connectWebSocket);
   const room = useStore(state => state.room);
   const isLoading = useStore(state => state.isLoading);
   const roomError = useStore(state => state.roomError);
 
-  useEffect(() => {
-    if (room) {
-      connectWebSocket();
-    }
-  }, [room]);
-
   const handleCreate = async () => {
-    const success = await createRoom();
-    if (success) {
-      setTimeout(() => connectWebSocket(), 100);
-    }
+    await createRoom();
   };
 
-  // Once room exists we go into "PIN reveal" mode (the App will redirect
-  // to RoomScreen on its own — but until WebSocket connects we show the
-  // access-granted moment with the PIN).
+  // Once room exists we go into "PIN reveal" mode
   const hasPin = !!room?.pin;
+  const showAnimation = isLoading || (hasPin && !room?.users?.length);
 
   return (
     <div className="sd-bg min-h-screen flex flex-col">
@@ -48,11 +38,11 @@ export default function CreateRoomScreen({ onBack }) {
       <div className="px-6 pt-6 pb-2">
         <div className="font-mono text-[11px] text-cyan tracking-[0.3em] text-center mb-1.5"
              style={{ textShadow: '0 0 8px rgba(0,217,255,0.6)' }}>
-          {hasPin ? '[ DECK ARMED ]' : '[ ARMING DECK… ]'}
+          {hasPin ? '[ DECK ARMED ]' : '[ SPINNING THE WHEELS… ]'}
         </div>
         <div className="font-display font-bold text-center leading-none text-[28px] tracking-tight">
           {hasPin ? (
-            <>Share the secret<br /><span className="text-magenta">code.</span></>
+            <>Your room<br /><span className="text-cyan">is ready!</span></>
           ) : (
             <>Ready to drop<br /><span className="text-magenta">the needle?</span></>
           )}
@@ -65,7 +55,7 @@ export default function CreateRoomScreen({ onBack }) {
         </div>
       )}
 
-      {/* PIN reveal card OR call-to-action */}
+      {/* PIN reveal card with slot machine */}
       <div className="px-4 pt-7 pb-3">
         <div
           className="surface relative overflow-hidden"
@@ -82,7 +72,10 @@ export default function CreateRoomScreen({ onBack }) {
             ROOM PIN — VALID 4H
           </div>
 
-          <PinDisplay pin={hasPin ? room.pin : ''} size="lg" />
+          <SlotMachine pin={hasPin ? room.pin : ''} size="lg" isSpinning={isLoading} />
+
+          {/* QR Code appears after PIN is revealed */}
+          {hasPin && <PinQRCode pin={room.pin} size={140} />}
 
           <div className="flex justify-center items-center gap-2 mt-5">
             <EqBars />
@@ -99,14 +92,15 @@ export default function CreateRoomScreen({ onBack }) {
           <button
             className="btn-neon btn-cyan flex-1"
             onClick={() => {
+              const shareText = `Join my SpinDeck room!\nPIN: ${room.pin}\n${window.location.origin}?join=${room.pin}`;
               if (navigator.share) {
                 navigator.share({
                   title: 'SpinDeck',
-                  text: `Join my room — PIN ${room.pin}`,
+                  text: shareText,
                   url: window.location.origin,
                 }).catch(() => {});
               } else {
-                navigator.clipboard?.writeText(`${window.location.origin} · PIN ${room.pin}`);
+                navigator.clipboard?.writeText(shareText);
               }
             }}
           >
@@ -116,9 +110,8 @@ export default function CreateRoomScreen({ onBack }) {
               <circle cx="18" cy="19" r="3" />
               <path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4" />
             </svg>
-            Share Link
+            Copy Link
           </button>
-          <button className="btn-neon btn-ghost flex-1">QR Code</button>
         </div>
       )}
 
@@ -138,7 +131,7 @@ export default function CreateRoomScreen({ onBack }) {
                   <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" fill="none" opacity="0.25" />
                   <path fill="currentColor" opacity="0.85" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z" />
                 </svg>
-                Arming Deck…
+                Spinning Wheels…
               </>
             ) : (
               <>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useStore } from '../stores/useStore';
 import SearchModal from './SearchModal';
 import QueueList from './QueueList';
@@ -17,16 +17,9 @@ export default function RoomScreen() {
   const hasVotedSkip = useStore(state => state.hasVotedSkip);
   const leaveRoom = useStore(state => state.leaveRoom);
   const disconnectWebSocket = useStore(state => state.disconnectWebSocket);
-  const connectWebSocket = useStore(state => state.connectWebSocket);
-  const isConnected = useStore(state => state.isConnected);
 
   const [showSearch, setShowSearch] = useState(false);
   const [showUsers, setShowUsers] = useState(false);
-
-  useEffect(() => {
-    console.log('[RoomScreen] Mounted, isConnected:', isConnected);
-    if (!isConnected) connectWebSocket();
-  }, []);
 
   const isHost = user?.isHost;
   const listeners = room?.users?.length || 0;

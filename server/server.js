@@ -33,6 +33,7 @@ await fastify.setNotFoundHandler((request, reply) => {
 // In-memory storage (MVP)
 const rooms = new Map();
 const wsClients = new Map(); // roomId -> Set of WebSocket connections
+const disconnectTimers = new Map(); // `${roomId}:${userId}` -> timerId
 
 // Generate unique 4-digit PIN
 function generatePIN() {
@@ -129,6 +130,7 @@ function addTrackToQueue(roomId, track) {
     thumbnail: track.thumbnail,
     duration: track.duration,
     addedBy: track.addedBy,
+    addedByName: track.addedByName,
     addedAt: Date.now()
   };
 
@@ -151,6 +153,10 @@ function broadcastToRoom(roomId, event, data) {
 
 // REST API Routes
 fastify.post('/api/rooms', async (request, reply) => {
+  if (rooms.size >= 5) {
+    return reply.code(400).send({ error: 'Server is at capacity (5 rooms). Try again later.' });
+  }
+
   const { username } = request.body;
   const room = createRoom(username);
   const user = addUserToRoom(room.id, username);
@@ -301,8 +307,17 @@ fastify.register(async function (fastify) {
         switch (event) {
           case 'room:join': {
             const { roomId, userId } = data;
+
+            // Cancel any pending disconnect timer for this user (reconnect case)
+            const rejoiningKey = `${roomId}:${userId}`;
+            if (disconnectTimers.has(rejoiningKey)) {
+              clearTimeout(disconnectTimers.get(rejoiningKey));
+              disconnectTimers.delete(rejoiningKey);
+              console.log('[WS] Reconnect: cancelled disconnect timer for', userId);
+            }
+
             const room = rooms.get(roomId);
-            
+
             if (!room) {
               ws.send(JSON.stringify({ event: 'error', data: { message: 'Room not found' } }));
               return;
@@ -351,9 +366,10 @@ fastify.register(async function (fastify) {
               room.currentTrack = queueTrack;
               room.isPlaying = true;
               room.skipVotes.clear();
-              
+
               broadcastToRoom(currentRoomId, 'room:state', {
                 room: { ...room, skipVotes: undefined },
+                queue: room.queue,
                 currentTrack: room.currentTrack,
                 isPlaying: room.isPlaying,
                 skipVotes: 0,
@@ -421,6 +437,7 @@ fastify.register(async function (fastify) {
               room.isPlaying = action === 'play';
               broadcastToRoom(currentRoomId, 'room:state', {
                 room: { ...room, skipVotes: undefined },
+                queue: room.queue,
                 currentTrack: room.currentTrack,
                 isPlaying: room.isPlaying,
                 skipVotes: room.skipVotes.size,
@@ -466,14 +483,20 @@ fastify.register(async function (fastify) {
 
           case 'room:leave': {
             if (currentRoomId && currentUserId) {
+              // Cancel any pending disconnect timer for this intentional leave
+              const leaveKey = `${currentRoomId}:${currentUserId}`;
+              if (disconnectTimers.has(leaveKey)) {
+                clearTimeout(disconnectTimers.get(leaveKey));
+                disconnectTimers.delete(leaveKey);
+              }
+
               const room = rooms.get(currentRoomId);
-              const user = room?.users.find(u => u.id === currentUserId);
-              
-              removeUserFromRoom(currentRoomId, currentUserId);
-              
               if (room) {
-                broadcastToRoom(currentRoomId, 'room:user-left', { userId: currentUserId });
-                
+                const leavingUser = room.users.find(u => u.id === currentUserId);
+                const wasHost = leavingUser?.isHost ?? false;
+
+                removeUserFromRoom(currentRoomId, currentUserId);
+
                 if (room.users.length === 0) {
                   // Clean up empty room
                   const clients = wsClients.get(currentRoomId);
@@ -482,12 +505,14 @@ fastify.register(async function (fastify) {
                     wsClients.delete(currentRoomId);
                   }
                   rooms.delete(currentRoomId);
-                } else if (user?.isHost) {
-                  // Notify about new host
-                  const newHost = room.users.find(u => u.isHost);
-                  broadcastToRoom(currentRoomId, 'room:host-changed', { 
-                    newHostId: newHost?.id 
-                  });
+                } else {
+                  broadcastToRoom(currentRoomId, 'room:user-left', { userId: currentUserId });
+                  if (wasHost) {
+                    const newHost = room.users.find(u => u.isHost);
+                    if (newHost) {
+                      broadcastToRoom(currentRoomId, 'room:host-changed', { newHostId: newHost.id });
+                    }
+                  }
                 }
               }
             }
@@ -500,34 +525,49 @@ fastify.register(async function (fastify) {
     });
 
     ws.on('close', () => {
-      if (currentRoomId && currentUserId) {
-        const clients = wsClients.get(currentRoomId);
-        if (clients) {
-          clients.delete(ws);
-          if (clients.size === 0) {
-            wsClients.delete(currentRoomId);
-          }
-        }
+      if (!currentRoomId || !currentUserId) return;
 
-        const room = rooms.get(currentRoomId);
-        if (room) {
-          removeUserFromRoom(currentRoomId, currentUserId);
-          
-          if (room.users.length === 0) {
-            rooms.delete(currentRoomId);
-          } else {
-            broadcastToRoom(currentRoomId, 'room:user-left', { userId: currentUserId });
-            
-            const user = room.users.find(u => u.id === currentUserId);
-            if (user?.isHost) {
-              const newHost = room.users.find(u => u.isHost);
-              broadcastToRoom(currentRoomId, 'room:host-changed', { 
-                newHostId: newHost?.id 
-              });
+      // Remove this specific WS connection immediately
+      const clients = wsClients.get(currentRoomId);
+      if (clients) {
+        clients.delete(ws);
+        if (clients.size === 0) {
+          wsClients.delete(currentRoomId);
+        }
+      }
+
+      // Grace period: give the user 45s to reconnect before removing them from the room
+      const timerKey = `${currentRoomId}:${currentUserId}`;
+      const roomIdSnapshot = currentRoomId;
+      const userIdSnapshot = currentUserId;
+
+      const timerId = setTimeout(() => {
+        disconnectTimers.delete(timerKey);
+
+        const room = rooms.get(roomIdSnapshot);
+        if (!room) return;
+
+        const leavingUser = room.users.find(u => u.id === userIdSnapshot);
+        if (!leavingUser) return; // Already removed (e.g., by room:leave)
+
+        const wasHost = leavingUser.isHost;
+        removeUserFromRoom(roomIdSnapshot, userIdSnapshot);
+
+        if (room.users.length === 0) {
+          rooms.delete(roomIdSnapshot);
+        } else {
+          broadcastToRoom(roomIdSnapshot, 'room:user-left', { userId: userIdSnapshot });
+          if (wasHost) {
+            const newHost = room.users.find(u => u.isHost);
+            if (newHost) {
+              broadcastToRoom(roomIdSnapshot, 'room:host-changed', { newHostId: newHost.id });
             }
           }
         }
-      }
+      }, 60000);
+
+      disconnectTimers.set(timerKey, timerId);
+      console.log(`[WS] User ${userIdSnapshot} disconnected; 60s grace period started`);
     });
   });
 });

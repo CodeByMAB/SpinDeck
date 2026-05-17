@@ -1,22 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useStore } from '../stores/useStore';
 import { Wordmark, PinDisplay } from './Brand';
 
 export default function JoinRoomScreen({ onBack }) {
   const [pin, setPin] = useState('');
   const joinRoom = useStore(state => state.joinRoom);
-  const connectWebSocket = useStore(state => state.connectWebSocket);
-  const room = useStore(state => state.room);
   const isLoading = useStore(state => state.isLoading);
   const roomError = useStore(state => state.roomError);
-  const isConnected = useStore(state => state.isConnected);
-
-  useEffect(() => {
-    if (room && !isConnected) {
-      console.log('[JoinRoomScreen] Room joined, connecting WebSocket...');
-      connectWebSocket();
-    }
-  }, [room, isConnected]);
 
   const handleJoin = async () => {
     if (pin.length === 4) await joinRoom(pin);

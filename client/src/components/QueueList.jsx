@@ -86,9 +86,9 @@ export default function QueueList({ queue, isHost, currentTrackId }) {
             </div>
 
             {/* Requester chip */}
-            {track.addedBy && (
+            {track.addedByName && (
               <div className="chip purple flex-shrink-0">
-                {String(track.addedBy).slice(0, 8).toUpperCase()}
+                {String(track.addedByName).slice(0, 12).toUpperCase()}
               </div>
             )}
 

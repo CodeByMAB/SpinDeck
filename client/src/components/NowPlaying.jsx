@@ -21,6 +21,9 @@ export default function NowPlaying({
   const [duration, setDuration] = useState(0);   // total seconds
   const containerRef = useRef(null);
   const tickRef = useRef(null);
+  // Ref so onStateChange always reads the latest isPlaying without stale closure
+  const isPlayingRef = useRef(isPlaying);
+  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
 
   // ── Load YouTube IFrame API (host only) ─────────────
   useEffect(() => {
@@ -70,18 +73,20 @@ export default function NowPlaying({
             ytPlayerReady = true;
             setDebugInfo('Playing audio…');
             try { setDuration(ytPlayer.getDuration() || 0); } catch {}
-            if (isPlaying) ytPlayer.playVideo();
+            if (isPlayingRef.current) ytPlayer.playVideo();
           },
           onStateChange: (event) => {
+            // Guard: ignore events after player has been destroyed
+            if (!ytPlayer || !ytPlayerReady) return;
             if (event.data === window.YT.PlayerState.ENDED) {
               controlPlayback('next');
             } else if (event.data === window.YT.PlayerState.PLAYING) {
               setDebugInfo('Playing');
               try { setDuration(ytPlayer.getDuration() || 0); } catch {}
-              if (!isPlaying) controlPlayback('play');
+              if (!isPlayingRef.current) controlPlayback('play');
             } else if (event.data === window.YT.PlayerState.PAUSED) {
               setDebugInfo('Paused');
-              if (isPlaying) controlPlayback('pause');
+              if (isPlayingRef.current) controlPlayback('pause');
             }
           },
         },
@@ -92,10 +97,12 @@ export default function NowPlaying({
 
     return () => {
       if (ytPlayer) {
+        ytPlayerReady = false; // mark as not ready first so onStateChange guards trigger
         ytPlayer.destroy();
         ytPlayer = null;
-        ytPlayerReady = false;
       }
+      setElapsed(0);
+      setDuration(0);
     };
   }, [isHost, currentTrack?.videoId, currentTrack?.sourceId]);
 
@@ -241,16 +248,6 @@ function HostDeck({ currentTrack, isPlaying, progress, elapsed, trackDuration, c
       </div>
 
       <div className="flex justify-center items-center gap-4 mt-2">
-        <button
-          onClick={() => controlPlayback('prev')}
-          className="btn-neon btn-ghost btn-circle"
-          style={{ width: 48, height: 48 }}
-          aria-label="Previous"
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M6 6h2v12H6zM9.5 12L18 6v12z" />
-          </svg>
-        </button>
         <button
           onClick={() => controlPlayback(isPlaying ? 'pause' : 'play')}
           className="btn-neon btn-primary btn-circle lg"
