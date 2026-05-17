@@ -1,4 +1,5 @@
 import { useStore } from '../stores/useStore';
+import { useState, useEffect } from 'react';
 import { Wordmark, EqBars } from './Brand';
 import { SlotMachine } from './SlotMachine';
 import { PinQRCode } from './PinQRCode';
@@ -15,7 +16,19 @@ export default function CreateRoomScreen({ onBack }) {
 
   // Once room exists we go into "PIN reveal" mode
   const hasPin = !!room?.pin;
-  const showAnimation = isLoading || (hasPin && !room?.users?.length);
+  
+  // Trigger spin when PIN first appears (after loading completes)
+  const [triggerSpin, setTriggerSpin] = useState(false);
+  
+  useEffect(() => {
+    // When loading finishes and PIN appears, trigger the spin
+    if (!isLoading && hasPin) {
+      setTriggerSpin(true);
+      // Reset trigger after spin completes (2s)
+      const timer = setTimeout(() => setTriggerSpin(false), 2500);
+      return () => clearTimeout(timer);
+    }
+  }, [isLoading, hasPin]);
 
   return (
     <div className="sd-bg min-h-screen flex flex-col">
@@ -72,7 +85,7 @@ export default function CreateRoomScreen({ onBack }) {
             ROOM PIN — VALID 4H
           </div>
 
-          <SlotMachine pin={hasPin ? room.pin : ''} size="lg" isSpinning={isLoading} />
+          <SlotMachine pin={hasPin ? room.pin : ''} size="lg" isSpinning={triggerSpin} />
 
           {/* QR Code appears after PIN is revealed */}
           {hasPin && <PinQRCode pin={room.pin} size={140} />}
