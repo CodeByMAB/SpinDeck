@@ -131,5 +131,3 @@ Custom neon palette with dark base — vinyl textures, glowing buttons, waveform
 MIT
 
 ---
-
-*Built by MAB — Naples, FL* 🦀
