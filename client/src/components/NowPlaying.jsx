@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../stores/useStore';
 import { VinylDisc, Waveform, EqBars } from './Brand';
 
-// YouTube player reference (kept at module scope for stability across renders)
+// Module-scope so they survive re-renders without being in React state
 let ytPlayer = null;
 let ytPlayerReady = false;
 
@@ -17,52 +17,56 @@ export default function NowPlaying({
   const controlPlayback = useStore(state => state.controlPlayback);
   const voteSkip = useStore(state => state.voteSkip);
   const [debugInfo, setDebugInfo] = useState('');
-  const [elapsed, setElapsed] = useState(0);     // seconds played (for waveform progress)
-  const [duration, setDuration] = useState(0);   // total seconds
-  const containerRef = useRef(null);
+  const [elapsed, setElapsed] = useState(0);
+  const [duration, setDuration] = useState(0);
   const tickRef = useRef(null);
-  // Ref so onStateChange always reads the latest isPlaying without stale closure
+
+  // Always-mounted div that the YT iframe lives inside.
+  // Keeping it out of conditional rendering prevents React from unmounting
+  // the element that YT already replaced with its <iframe>, which would cause
+  // a "removeChild" DOM error and blank the screen.
+  const ytContainerRef = useRef(null);
+
+  // Ref so onStateChange always reads the latest isPlaying (avoids stale closure)
   const isPlayingRef = useRef(isPlaying);
   useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
 
   // ── Load YouTube IFrame API (host only) ─────────────
   useEffect(() => {
     if (!isHost) return;
-    if (window.YT && window.YT.Player) {
-      console.log('[YouTube] API already loaded');
-      return;
-    }
+    if (window.YT && window.YT.Player) return;
     const tag = document.createElement('script');
     tag.src = 'https://www.youtube.com/iframe_api';
     document.head.appendChild(tag);
-    window.onYouTubeIframeAPIReady = () => {
-      console.log('[YouTube] API Ready');
-      setDebugInfo('API Ready');
-    };
+    window.onYouTubeIframeAPIReady = () => setDebugInfo('API Ready');
   }, [isHost]);
 
-  // ── Create / refresh player on track change ─────────
+  // ── Create / refresh player when track changes ──────
   useEffect(() => {
     if (!isHost || !currentTrack) return;
 
     const videoId = currentTrack.videoId || currentTrack.sourceId;
-    if (!videoId) {
-      setDebugInfo('Error: No videoId');
-      return;
-    }
-    if (!window.YT || !window.YT.Player) return;
+    if (!videoId) { setDebugInfo('Error: No videoId'); return; }
+    if (!window.YT?.Player) return;
 
+    // Tear down any existing player first
     if (ytPlayer) {
+      ytPlayerReady = false;
       ytPlayer.destroy();
       ytPlayer = null;
-      ytPlayerReady = false;
     }
 
-    const playerDiv = document.getElementById('yt-player');
-    if (!playerDiv) return;
+    // Create a fresh div inside our persistent container for YT to own.
+    // YT replaces this child div with its <iframe>; the container itself
+    // stays React-managed and is never unmounted.
+    const container = ytContainerRef.current;
+    if (!container) return;
+    container.innerHTML = '';
+    const playerEl = document.createElement('div');
+    container.appendChild(playerEl);
 
     try {
-      ytPlayer = new window.YT.Player('yt-player', {
+      ytPlayer = new window.YT.Player(playerEl, {
         videoId,
         playerVars: {
           autoplay: 1, controls: 0, disablekb: 1, fs: 0, modestbranding: 1,
@@ -75,8 +79,11 @@ export default function NowPlaying({
             try { setDuration(ytPlayer.getDuration() || 0); } catch {}
             if (isPlayingRef.current) ytPlayer.playVideo();
           },
+          onError: () => {
+            setDebugInfo('Playback error — skipping…');
+            controlPlayback('next');
+          },
           onStateChange: (event) => {
-            // Guard: ignore events after player has been destroyed
             if (!ytPlayer || !ytPlayerReady) return;
             if (event.data === window.YT.PlayerState.ENDED) {
               controlPlayback('next');
@@ -97,14 +104,15 @@ export default function NowPlaying({
 
     return () => {
       if (ytPlayer) {
-        ytPlayerReady = false; // mark as not ready first so onStateChange guards trigger
+        ytPlayerReady = false;
         ytPlayer.destroy();
         ytPlayer = null;
       }
+      if (ytContainerRef.current) ytContainerRef.current.innerHTML = '';
       setElapsed(0);
       setDuration(0);
     };
-  }, [isHost, currentTrack?.videoId, currentTrack?.sourceId]);
+  }, [isHost, currentTrack?.videoId, currentTrack?.sourceId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Sync play/pause ─────────────────────────────────
   useEffect(() => {
@@ -113,10 +121,9 @@ export default function NowPlaying({
     else ytPlayer.pauseVideo();
   }, [isPlaying, isHost]);
 
-  // ── Tick: track current time for waveform progress ──
+  // ── Tick: track current time for waveform ───────────
   useEffect(() => {
     clearInterval(tickRef.current);
-    // Only run tick if we have a valid track and are actually playing
     if (isHost && isPlaying && currentTrack && ytPlayer) {
       tickRef.current = setInterval(() => {
         try {
@@ -128,85 +135,84 @@ export default function NowPlaying({
     return () => clearInterval(tickRef.current);
   }, [isHost, isPlaying, currentTrack]);
 
-  // ── Empty state ─────────────────────────────────────
-  if (!currentTrack) {
-    return (
-      <div className="px-6 py-10 flex flex-col items-center text-center">
-        <div className="opacity-50 mb-4">
-          <VinylDisc size={140} spinning={false} label="EMPTY DECK" />
-        </div>
-        <p className="text-tx-md">No track loaded.</p>
-        <p className="text-tx-lo text-sm mt-1">
-          {isHost ? 'Drop the needle — add a song below.' : 'Ask someone to spin a track.'}
-        </p>
-      </div>
-    );
-  }
-
-  const trackDuration = duration || currentTrack.duration || 0;
+  const isEmpty = !currentTrack;
+  const trackDuration = isEmpty ? 0 : (duration || currentTrack.duration || 0);
   const progress = trackDuration > 0 ? Math.min(elapsed / trackDuration, 1) : 0;
 
-  // Compact-card view for both host AND guest. Host gets transport controls.
   return (
-    <div className="px-4 pt-2">
-      {/* Hidden YouTube player (audio-only) */}
+    <>
+      {/* Persistent YT container — always in DOM so YT's iframe is never
+          orphaned when currentTrack goes null (which would crash React's
+          removeChild and blank the screen). Hidden off-screen when unused. */}
       {isHost && (
-        <div className="mb-3">
-          <div id="yt-player" ref={containerRef} className="hidden" />
-          {debugInfo && (
-            <p className="font-mono text-[9px] text-tx-mute tracking-widest text-center">
+        <div
+          ref={ytContainerRef}
+          style={{ position: 'fixed', top: -9999, left: -9999, width: 1, height: 1, overflow: 'hidden', pointerEvents: 'none' }}
+        />
+      )}
+
+      {isEmpty ? (
+        <div className="px-6 py-10 flex flex-col items-center text-center">
+          <div className="opacity-50 mb-4">
+            <VinylDisc size={140} spinning={false} label="EMPTY DECK" />
+          </div>
+          <p className="text-tx-md">No track loaded.</p>
+          <p className="text-tx-lo text-sm mt-1">
+            {isHost ? 'Drop the needle — add a song below.' : 'Ask someone to spin a track.'}
+          </p>
+        </div>
+      ) : (
+        <div className="px-4 pt-2">
+          {isHost && debugInfo && (
+            <p className="font-mono text-[9px] text-tx-mute tracking-widest text-center mb-1">
               ▸ {debugInfo}
             </p>
           )}
+
+          <div className="surface surface-glow relative overflow-hidden p-4">
+            <div className="flex justify-between items-center mb-3">
+              <div className="font-mono text-[10px] text-cyan tracking-[0.3em]">
+                ▸ DECK A — NOW SPINNING
+              </div>
+              <EqBars />
+            </div>
+
+            {isHost ? (
+              <HostDeck
+                currentTrack={currentTrack}
+                isPlaying={isPlaying}
+                progress={progress}
+                elapsed={elapsed}
+                trackDuration={trackDuration}
+                controlPlayback={controlPlayback}
+              />
+            ) : (
+              <GuestDeck
+                currentTrack={currentTrack}
+                isPlaying={isPlaying}
+                progress={progress}
+                elapsed={elapsed}
+                trackDuration={trackDuration}
+                voteSkip={voteSkip}
+                hasVotedSkip={hasVotedSkip}
+                skipVotes={skipVotes}
+                skipThreshold={skipThreshold}
+              />
+            )}
+
+            <div className="absolute top-3 right-3 flex gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-cyan" style={{ boxShadow: '0 0 8px #00D9FF' }} />
+              <span className="w-1.5 h-1.5 rounded-full bg-primary" style={{ boxShadow: '0 0 8px #A855F7' }} />
+              <span className="w-1.5 h-1.5 rounded-full bg-magenta" style={{ boxShadow: '0 0 8px #FF2D8E' }} />
+            </div>
+          </div>
         </div>
       )}
-
-      <div className="surface surface-glow relative overflow-hidden p-4">
-        {/* Deck header */}
-        <div className="flex justify-between items-center mb-3">
-          <div className="font-mono text-[10px] text-cyan tracking-[0.3em]">
-            ▸ DECK A — NOW SPINNING
-          </div>
-          <EqBars />
-        </div>
-
-        {isHost ? (
-          /* HOST VIEW — Large vinyl + transport */
-          <HostDeck
-            currentTrack={currentTrack}
-            isPlaying={isPlaying}
-            progress={progress}
-            elapsed={elapsed}
-            trackDuration={trackDuration}
-            controlPlayback={controlPlayback}
-          />
-        ) : (
-          /* GUEST VIEW — Compact deck + skip vote */
-          <GuestDeck
-            currentTrack={currentTrack}
-            isPlaying={isPlaying}
-            progress={progress}
-            elapsed={elapsed}
-            trackDuration={trackDuration}
-            voteSkip={voteSkip}
-            hasVotedSkip={hasVotedSkip}
-            skipVotes={skipVotes}
-            skipThreshold={skipThreshold}
-          />
-        )}
-
-        {/* Corner LEDs */}
-        <div className="absolute top-3 right-3 flex gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full bg-cyan" style={{ boxShadow: '0 0 8px #00D9FF' }} />
-          <span className="w-1.5 h-1.5 rounded-full bg-primary" style={{ boxShadow: '0 0 8px #A855F7' }} />
-          <span className="w-1.5 h-1.5 rounded-full bg-magenta" style={{ boxShadow: '0 0 8px #FF2D8E' }} />
-        </div>
-      </div>
-    </div>
+    </>
   );
 }
 
-/* ─── Host: full deck with vinyl + transport ─────────── */
+/* ─── Host: vinyl + transport ────────────────────────── */
 function HostDeck({ currentTrack, isPlaying, progress, elapsed, trackDuration, controlPlayback }) {
   return (
     <>
@@ -217,15 +223,11 @@ function HostDeck({ currentTrack, isPlaying, progress, elapsed, trackDuration, c
           art={currentTrack.thumbnail}
           label={(currentTrack.title || '').slice(0, 12)}
         />
-        {/* (Optional) BPM badge — left as static decoration */}
         <div
           className="absolute top-2 right-2 px-2 py-1.5 rounded-xl text-center"
           style={{ background: 'rgba(13,8,32,0.85)', border: '1px solid #3A2266' }}
         >
-          <div
-            className="font-mono text-base font-extrabold text-cyan"
-            style={{ textShadow: '0 0 6px rgba(0,217,255,0.5)' }}
-          >
+          <div className="font-mono text-base font-extrabold text-cyan" style={{ textShadow: '0 0 6px rgba(0,217,255,0.5)' }}>
             {isPlaying ? '▸' : '⏸'}
           </div>
           <div className="font-mono text-[8px] text-tx-lo tracking-[0.15em]">DECK</div>
@@ -278,7 +280,7 @@ function HostDeck({ currentTrack, isPlaying, progress, elapsed, trackDuration, c
   );
 }
 
-/* ─── Guest: compact deck + skip vote meter ──────────── */
+/* ─── Guest: compact + skip vote ─────────────────────── */
 function GuestDeck({ currentTrack, isPlaying, progress, elapsed, trackDuration, voteSkip, hasVotedSkip, skipVotes, skipThreshold }) {
   const pct = skipThreshold > 0 ? Math.min((skipVotes / skipThreshold) * 100, 100) : 0;
 
@@ -304,39 +306,19 @@ function GuestDeck({ currentTrack, isPlaying, progress, elapsed, trackDuration, 
         </div>
       </div>
 
-      {/* Skip vote meter */}
-      <div
-        className="flex items-center gap-3 p-3 rounded-2xl"
-        style={{ background: 'rgba(13,8,32,0.5)', border: '1px solid #3A2266' }}
-      >
-        <div
-          className="flex items-center justify-center w-10 h-10 rounded-xl text-magenta"
-          style={{
-            background: 'rgba(255,45,142,0.1)',
-            border: '1px solid rgba(255,45,142,0.3)',
-          }}
-        >
+      <div className="flex items-center gap-3 p-3 rounded-2xl" style={{ background: 'rgba(13,8,32,0.5)', border: '1px solid #3A2266' }}>
+        <div className="flex items-center justify-center w-10 h-10 rounded-xl text-magenta" style={{ background: 'rgba(255,45,142,0.1)', border: '1px solid rgba(255,45,142,0.3)' }}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M13 19l9-7-9-7v14zM2 19l9-7-9-7v14z" />
           </svg>
         </div>
         <div className="flex-1">
-          <div className="text-[13px] font-semibold">
-            {hasVotedSkip ? 'Vote registered' : 'Vote to skip'}
-          </div>
+          <div className="text-[13px] font-semibold">{hasVotedSkip ? 'Vote registered' : 'Vote to skip'}</div>
           <div className="font-mono text-[10px] text-tx-lo tracking-[0.15em] mt-0.5">
             {skipVotes} / {skipThreshold} · MAJORITY RULES
           </div>
           <div className="h-1 rounded mt-1.5 overflow-hidden" style={{ background: 'rgba(58,34,102,0.5)' }}>
-            <div
-              className="h-full"
-              style={{
-                width: `${pct}%`,
-                background: 'linear-gradient(90deg, #FF2D8E, #C026D3)',
-                boxShadow: '0 0 8px #FF2D8E',
-                transition: 'width 0.4s ease',
-              }}
-            />
+            <div className="h-full" style={{ width: `${pct}%`, background: 'linear-gradient(90deg, #FF2D8E, #C026D3)', boxShadow: '0 0 8px #FF2D8E', transition: 'width 0.4s ease' }} />
           </div>
         </div>
         <button

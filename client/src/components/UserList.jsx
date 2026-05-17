@@ -3,6 +3,7 @@ import { useStore } from '../stores/useStore';
 export default function UserList({ onClose }) {
   const room = useStore(state => state.room);
   const user = useStore(state => state.user);
+  const transferHost = useStore(state => state.transferHost);
 
   const users = room?.users || [];
 
@@ -78,8 +79,18 @@ export default function UserList({ onClose }) {
                   </div>
                 </div>
 
-                {/* Role chip */}
+                {/* Role chip / host transfer */}
                 {u.isHost && <div className="chip magenta">HOST</div>}
+                {!u.isHost && user?.isHost && (
+                  <button
+                    onClick={() => { transferHost(u.id); onClose(); }}
+                    className="chip"
+                    style={{ color: '#00D9FF', borderColor: 'rgba(0,217,255,0.35)', background: 'rgba(0,217,255,0.07)', cursor: 'pointer', flexShrink: 0 }}
+                    title="Make this person the host"
+                  >
+                    Promote
+                  </button>
+                )}
               </div>
             );
           })}

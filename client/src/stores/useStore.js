@@ -2,6 +2,10 @@ import { create } from 'zustand';
 
 const API_BASE = ''; // Same origin (server serves client + API)
 
+// Module-level reconnect state (not UI state — no need to put in the store)
+let _reconnectDelay = 1000;
+let _intentionalClose = false;
+
 // localStorage keys
 const STORAGE_KEYS = {
   USER: 'sj_user',
@@ -178,7 +182,7 @@ export const useStore = create((set, get) => ({
   },
 
   leaveRoom: () => {
-    // Close any open WS so stale connections don't block future room joins
+    _intentionalClose = true;
     const { ws } = get();
     if (ws) {
       try { ws.close(); } catch {}
@@ -222,6 +226,7 @@ export const useStore = create((set, get) => ({
     
     ws.onopen = () => {
       console.log('[WS] Connected!');
+      _reconnectDelay = 1000; // reset backoff on successful connect
       set({ isConnected: true, ws });
       ws.send(JSON.stringify({
         event: 'room:join',
@@ -239,31 +244,24 @@ export const useStore = create((set, get) => ({
             console.warn('[WS] room:state received with null room, ignoring');
             break;
           }
+          // FR-042: reset skip vote when track changes
+          const prevTrackId = get().currentTrack?.id;
+          const trackChanged = prevTrackId !== data.currentTrack?.id;
           set({
             room: data.room,
             queue: data.queue || [],
             currentTrack: data.currentTrack,
             isPlaying: data.isPlaying,
             skipVotes: data.skipVotes,
-            skipThreshold: data.skipThreshold
+            skipThreshold: data.skipThreshold,
+            hasVotedSkip: trackChanged ? false : get().hasVotedSkip,
           });
-          // Update localStorage with fresh room data
           saveToStorage(get().user, data.room, get().username);
           break;
         }
-        
+
         case 'queue:updated': {
           set({ queue: data.queue });
-          break;
-        }
-        
-        case 'playback:state': {
-          set({
-            currentTrack: data.currentTrack,
-            isPlaying: data.isPlaying,
-            skipVotes: data.skipVotes,
-            skipThreshold: data.skipThreshold
-          });
           break;
         }
         
@@ -333,19 +331,33 @@ export const useStore = create((set, get) => ({
     ws.onerror = (error) => {
       console.error('[WS] Error:', error);
     };
-    
+
     ws.onclose = (event) => {
       console.log('[WS] Closed:', event.code, event.reason);
       set({ isConnected: false, ws: null });
+
+      // NF-011: auto-reconnect unless the close was intentional (leave/logout)
+      const { room, user } = get();
+      if (room && user && !_intentionalClose) {
+        console.log(`[WS] Reconnecting in ${_reconnectDelay}ms…`);
+        setTimeout(() => {
+          _reconnectDelay = Math.min(_reconnectDelay * 2, 30000);
+          get().connectWebSocket();
+        }, _reconnectDelay);
+      } else {
+        _reconnectDelay = 1000;
+        _intentionalClose = false;
+      }
     };
-    
+
     set({ ws });
   },
   
   disconnectWebSocket: () => {
     const { ws } = get();
+    _intentionalClose = true;
     if (ws) {
-      ws.send(JSON.stringify({ event: 'room:leave', data: {} }));
+      try { ws.send(JSON.stringify({ event: 'room:leave', data: {} })); } catch {}
       ws.close();
     }
     set({ ws: null, isConnected: false });
@@ -372,6 +384,18 @@ export const useStore = create((set, get) => ({
     const { ws } = get();
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify({ event: 'queue:remove', data: { trackId } }));
+  },
+
+  clearQueue: () => {
+    const { ws } = get();
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ event: 'queue:clear', data: {} }));
+  },
+
+  transferHost: (targetUserId) => {
+    const { ws } = get();
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ event: 'host:transfer', data: { targetUserId } }));
   },
 
   controlPlayback: (action) => {

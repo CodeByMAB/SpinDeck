@@ -1,22 +1,35 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useStore } from '../stores/useStore';
 import { Wordmark, PinDisplay } from './Brand';
 
 export default function JoinRoomScreen({ onBack, initialPin = '' }) {
   const [pin, setPin] = useState(initialPin);
   const joinRoom = useStore(state => state.joinRoom);
+  const username = useStore(state => state.username);
   const isLoading = useStore(state => state.isLoading);
   const roomError = useStore(state => state.roomError);
 
+  // Auto-join when arriving via QR code deeplink with a complete PIN and a saved username.
+  // Without a username the join will fail gracefully (roomError shows).
+  useEffect(() => {
+    if (initialPin.length === 4 && username.trim()) {
+      joinRoom(initialPin);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleJoin = async () => {
-    if (pin.length === 4) await joinRoom(pin);
+    if (pin.length === 4 && !isLoading) await joinRoom(pin);
   };
 
   const press = (key) => {
+    if (isLoading) return;
     if (key === '⌫') {
       setPin(p => p.slice(0, -1));
     } else if (pin.length < 4 && /^\d$/.test(key)) {
-      setPin(p => p + key);
+      const next = pin + key;
+      setPin(next);
+      // Auto-submit on 4th digit
+      if (next.length === 4) joinRoom(next);
     }
   };
 

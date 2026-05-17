@@ -20,7 +20,13 @@ function App() {
     return params.get('pin') || '';
   });
 
-  const [view, setView] = useState(() => initialPin ? 'join' : 'home');
+  // Only skip HomeScreen for QR deeplink if the user already has a saved username.
+  // Without a username they need to enter their DJ tag first.
+  const [view, setView] = useState(() => {
+    if (!initialPin) return 'home';
+    const savedUsername = localStorage.getItem('sj_username') || '';
+    return savedUsername.trim() ? 'join' : 'home';
+  });
 
   // CreateRoomScreen calls this when the PIN animation finishes — only then do
   // we switch to RoomScreen so the user actually sees the slot machine spin.

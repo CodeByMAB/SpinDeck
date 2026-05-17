@@ -151,6 +151,24 @@ function broadcastToRoom(roomId, event, data) {
   });
 }
 
+// Periodic cleanup: expire rooms per their inactivityTimeout setting (default 30 min)
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, room] of rooms) {
+    const timeoutMs = (room.settings.inactivityTimeout || 30) * 60 * 1000;
+    if (now - room.lastActivity > timeoutMs) {
+      broadcastToRoom(id, 'room:closed', {});
+      const clients = wsClients.get(id);
+      if (clients) {
+        clients.forEach(ws => ws.close());
+        wsClients.delete(id);
+      }
+      rooms.delete(id);
+      console.log(`[Cleanup] Expired room ${id} (PIN ${room.pin}) after inactivity`);
+    }
+  }
+}, 60 * 1000); // check every minute
+
 // REST API Routes
 fastify.post('/api/rooms', async (request, reply) => {
   if (rooms.size >= 5) {
@@ -158,8 +176,11 @@ fastify.post('/api/rooms', async (request, reply) => {
   }
 
   const { username } = request.body;
-  const room = createRoom(username);
-  const user = addUserToRoom(room.id, username);
+  if (!username || typeof username !== 'string' || !username.trim() || username.trim().length > 30) {
+    return reply.code(400).send({ error: 'Username must be 1–30 characters.' });
+  }
+  const room = createRoom(username.trim());
+  const user = addUserToRoom(room.id, username.trim());
   
   return { room: { ...room, users: room.users, skipVotes: undefined }, user };
 });
@@ -195,7 +216,10 @@ fastify.post('/api/rooms/:id/join', async (request, reply) => {
     return reply.code(400).send({ error: 'Room is full' });
   }
 
-  const user = addUserToRoom(id, username);
+  if (!username || typeof username !== 'string' || !username.trim() || username.trim().length > 30) {
+    return reply.code(400).send({ error: 'Username must be 1–30 characters.' });
+  }
+  const user = addUserToRoom(id, username.trim());
   broadcastToRoom(id, 'room:user-joined', { user });
   
   return { room: { ...room, users: room.users, skipVotes: undefined }, user };
@@ -234,6 +258,9 @@ fastify.get('/api/rooms/:id/queue', async (request, reply) => {
 
 fastify.post('/api/search/youtube', async (request, reply) => {
   const { query } = request.body;
+  if (!query || typeof query !== 'string' || !query.trim() || query.length > 200) {
+    return reply.code(400).send({ error: 'Invalid search query.' });
+  }
   const apiKey = process.env.YOUTUBE_API_KEY;
   
   if (!apiKey) {
@@ -347,15 +374,12 @@ fastify.register(async function (fastify) {
           }
 
           case 'queue:add': {
-            console.log('[WS] queue:add received', data);
             const { track } = data;
             const room = rooms.get(currentRoomId);
-            console.log('[WS] Room found:', !!room, 'currentRoomId:', currentRoomId);
-            
             if (!room) return;
 
             const queueTrack = addTrackToQueue(currentRoomId, track);
-            console.log('[WS] Track added to queue:', queueTrack);
+            console.log(`[WS] Track queued: "${queueTrack.title}" in room ${currentRoomId}`);
             
             broadcastToRoom(currentRoomId, 'queue:updated', { 
               queue: room.queue 
@@ -467,7 +491,7 @@ fastify.register(async function (fastify) {
           case 'queue:remove': {
             const { trackId } = data;
             const room = rooms.get(currentRoomId);
-            
+
             if (!room) return;
 
             const user = room.users.find(u => u.id === currentUserId);
@@ -478,6 +502,37 @@ fastify.register(async function (fastify) {
 
             room.queue = room.queue.filter(t => t.id !== trackId);
             broadcastToRoom(currentRoomId, 'queue:updated', { queue: room.queue });
+            break;
+          }
+
+          case 'queue:clear': {
+            const room = rooms.get(currentRoomId);
+            if (!room) return;
+            const user = room.users.find(u => u.id === currentUserId);
+            if (!user || !user.isHost) return;
+            // Keep the currently-playing track; only clear the upcoming tracks
+            const playing = room.currentTrack
+              ? room.queue.filter(t => t.id === room.currentTrack.id)
+              : [];
+            room.queue = playing;
+            room.lastActivity = Date.now();
+            broadcastToRoom(currentRoomId, 'queue:updated', { queue: room.queue });
+            break;
+          }
+
+          case 'host:transfer': {
+            const { targetUserId } = data;
+            const room = rooms.get(currentRoomId);
+            if (!room) return;
+            const requester = room.users.find(u => u.id === currentUserId);
+            if (!requester || !requester.isHost) return;
+            const target = room.users.find(u => u.id === targetUserId);
+            if (!target) return;
+            room.users.forEach(u => { u.isHost = false; });
+            target.isHost = true;
+            room.hostId = targetUserId;
+            room.lastActivity = Date.now();
+            broadcastToRoom(currentRoomId, 'room:host-changed', { newHostId: targetUserId });
             break;
           }
 

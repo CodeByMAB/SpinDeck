@@ -15,6 +15,8 @@ export default function RoomScreen() {
   const skipVotes = useStore(state => state.skipVotes);
   const skipThreshold = useStore(state => state.skipThreshold);
   const hasVotedSkip = useStore(state => state.hasVotedSkip);
+  const isConnected = useStore(state => state.isConnected);
+  const clearQueue = useStore(state => state.clearQueue);
   const leaveRoom = useStore(state => state.leaveRoom);
   const disconnectWebSocket = useStore(state => state.disconnectWebSocket);
 
@@ -31,6 +33,20 @@ export default function RoomScreen() {
 
   return (
     <div className="sd-bg min-h-screen flex flex-col">
+      {/* Reconnecting banner — shown when WS drops but room is still held */}
+      {!isConnected && (
+        <div
+          className="sticky top-0 z-30 flex items-center justify-center gap-2 py-2 font-mono text-[11px] tracking-widest"
+          style={{ background: 'rgba(255,45,142,0.15)', borderBottom: '1px solid rgba(255,45,142,0.4)', color: '#FF2D8E' }}
+        >
+          <svg className="animate-spin flex-shrink-0" width="12" height="12" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" fill="none" opacity="0.25" />
+            <path fill="currentColor" opacity="0.85" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z" />
+          </svg>
+          CONNECTION LOST · RECONNECTING…
+        </div>
+      )}
+
       {/* Header */}
       <header className="sticky top-0 z-20 backdrop-blur-md bg-ink-0/70 border-b border-line/60">
         <div className="flex items-center justify-between px-4 pt-10 pb-3">
@@ -106,7 +122,21 @@ export default function RoomScreen() {
             </div>
           </div>
           {!isHost && <div className="chip purple">YOU'RE ON THE FLOOR</div>}
-          {isHost && <EqBars />}
+          {isHost && (
+            <div className="flex items-center gap-2">
+              {queue.length > 1 && (
+                <button
+                  onClick={clearQueue}
+                  className="chip"
+                  style={{ color: '#FF2D8E', borderColor: 'rgba(255,45,142,0.35)', background: 'rgba(255,45,142,0.07)', cursor: 'pointer' }}
+                  title="Clear upcoming tracks"
+                >
+                  Clear
+                </button>
+              )}
+              <EqBars />
+            </div>
+          )}
         </div>
 
         <QueueList queue={queue} isHost={isHost} currentTrackId={currentTrack?.id} />
