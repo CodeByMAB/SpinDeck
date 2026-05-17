@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { useStore } from '../stores/useStore';
 import { Wordmark, PinDisplay } from './Brand';
 
-export default function JoinRoomScreen({ onBack }) {
-  const [pin, setPin] = useState('');
+export default function JoinRoomScreen({ onBack, initialPin = '' }) {
+  const [pin, setPin] = useState(initialPin);
   const joinRoom = useStore(state => state.joinRoom);
   const isLoading = useStore(state => state.isLoading);
   const roomError = useStore(state => state.roomError);

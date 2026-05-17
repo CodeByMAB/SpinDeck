@@ -4,31 +4,51 @@ import { Wordmark, EqBars } from './Brand';
 import { SlotMachine } from './SlotMachine';
 import { PinQRCode } from './PinQRCode';
 
-export default function CreateRoomScreen({ onBack }) {
+// Reel 3 settles at ~2740ms; QR appears at 2850ms; spin resets at 3200ms.
+const QR_REVEAL_MS  = 2850;
+const SPIN_RESET_MS = 3200;
+// After spin resets the button becomes active. Auto-advance after 90s if unused.
+const AUTO_ENTER_MS = 90_000;
+
+export default function CreateRoomScreen({ onBack, onAnimDone }) {
   const createRoom = useStore(state => state.createRoom);
-  const room = useStore(state => state.room);
-  const isLoading = useStore(state => state.isLoading);
-  const roomError = useStore(state => state.roomError);
+  const room       = useStore(state => state.room);
+  const isLoading  = useStore(state => state.isLoading);
+  const roomError  = useStore(state => state.roomError);
 
-  const handleCreate = async () => {
-    await createRoom();
-  };
-
-  // Once room exists we go into "PIN reveal" mode
   const hasPin = !!room?.pin;
-  
-  // Trigger spin when PIN first appears (after loading completes)
+
   const [triggerSpin, setTriggerSpin] = useState(false);
-  
+  const [showQR,      setShowQR]      = useState(false);
+  const [animDone,    setAnimDone]    = useState(false); // true after reels settle
+
   useEffect(() => {
-    // When loading finishes and PIN appears, trigger the spin
     if (!isLoading && hasPin) {
       setTriggerSpin(true);
-      // Reset trigger after spin completes (2s)
-      const timer = setTimeout(() => setTriggerSpin(false), 2500);
-      return () => clearTimeout(timer);
+      setShowQR(false);
+      setAnimDone(false);
+
+      const qrTimer   = setTimeout(() => setShowQR(true),      QR_REVEAL_MS);
+      const spinTimer = setTimeout(() => {
+        setTriggerSpin(false);
+        setAnimDone(true);
+      }, SPIN_RESET_MS);
+
+      return () => {
+        clearTimeout(qrTimer);
+        clearTimeout(spinTimer);
+      };
     }
-  }, [isLoading, hasPin]);
+  }, [isLoading, hasPin]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-advance 90 seconds after the animation finishes
+  useEffect(() => {
+    if (!animDone) return;
+    const t = setTimeout(() => onAnimDone?.(), AUTO_ENTER_MS);
+    return () => clearTimeout(t);
+  }, [animDone]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const joinUrl = hasPin ? `${window.location.origin}?pin=${room.pin}` : '';
 
   return (
     <div className="sd-bg min-h-screen flex flex-col">
@@ -49,8 +69,10 @@ export default function CreateRoomScreen({ onBack }) {
 
       {/* Status header */}
       <div className="px-6 pt-6 pb-2">
-        <div className="font-mono text-[11px] text-cyan tracking-[0.3em] text-center mb-1.5"
-             style={{ textShadow: '0 0 8px rgba(0,217,255,0.6)' }}>
+        <div
+          className="font-mono text-[11px] text-cyan tracking-[0.3em] text-center mb-1.5"
+          style={{ textShadow: '0 0 8px rgba(0,217,255,0.6)' }}
+        >
           {hasPin ? '[ DECK ARMED ]' : '[ SPINNING THE WHEELS… ]'}
         </div>
         <div className="font-display font-bold text-center leading-none text-[28px] tracking-tight">
@@ -68,15 +90,14 @@ export default function CreateRoomScreen({ onBack }) {
         </div>
       )}
 
-      {/* PIN reveal card with slot machine */}
+      {/* PIN reveal card */}
       <div className="px-4 pt-7 pb-3">
         <div
           className="surface relative overflow-hidden"
           style={{
             padding: '28px 16px 20px',
             borderRadius: 22,
-            background:
-              'radial-gradient(ellipse at top, rgba(0,217,255,0.16), rgba(13,8,32,0.85))',
+            background: 'radial-gradient(ellipse at top, rgba(0,217,255,0.16), rgba(13,8,32,0.85))',
           }}
         >
           {hasPin && <div className="scan-line" style={{ top: 0 }} />}
@@ -87,8 +108,7 @@ export default function CreateRoomScreen({ onBack }) {
 
           <SlotMachine pin={hasPin ? room.pin : ''} size="lg" isSpinning={triggerSpin} />
 
-          {/* QR Code appears after PIN is revealed */}
-          {hasPin && <PinQRCode pin={room.pin} size={140} />}
+          <PinQRCode pin={hasPin ? room.pin : ''} size={160} visible={showQR} />
 
           <div className="flex justify-center items-center gap-2 mt-5">
             <EqBars />
@@ -99,19 +119,15 @@ export default function CreateRoomScreen({ onBack }) {
         </div>
       </div>
 
-      {/* Share row (only after PIN exists) */}
+      {/* Share row — only after PIN exists */}
       {hasPin && (
         <div className="px-4 pb-3 flex gap-2">
           <button
             className="btn-neon btn-cyan flex-1"
             onClick={() => {
-              const shareText = `Join my SpinDeck room!\nPIN: ${room.pin}\n${window.location.origin}?join=${room.pin}`;
+              const shareText = `Join my SpinDeck room!\nPIN: ${room.pin}\n${joinUrl}`;
               if (navigator.share) {
-                navigator.share({
-                  title: 'SpinDeck',
-                  text: shareText,
-                  url: window.location.origin,
-                }).catch(() => {});
+                navigator.share({ title: 'SpinDeck', text: shareText, url: joinUrl }).catch(() => {});
               } else {
                 navigator.clipboard?.writeText(shareText);
               }
@@ -134,7 +150,7 @@ export default function CreateRoomScreen({ onBack }) {
       <div className="px-5 pb-8">
         {!hasPin ? (
           <button
-            onClick={handleCreate}
+            onClick={() => createRoom()}
             disabled={isLoading}
             className="btn-neon btn-primary w-full"
           >
@@ -148,19 +164,32 @@ export default function CreateRoomScreen({ onBack }) {
               </>
             ) : (
               <>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z"/></svg>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z" />
+                </svg>
                 Generate Room PIN
               </>
             )}
           </button>
-        ) : (
-          <button className="btn-neon btn-primary w-full" disabled>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <circle cx="12" cy="12" r="10" />
-              <circle cx="12" cy="12" r="4" />
-              <circle cx="12" cy="12" r="1.2" fill="currentColor" />
+        ) : animDone ? (
+          /* Animation finished — let the host enter the room */
+          <button
+            onClick={() => onAnimDone?.()}
+            className="btn-neon btn-cyan w-full"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M8 5v14l11-7z" />
             </svg>
-            Connecting to Deck…
+            Drop the Needle
+          </button>
+        ) : (
+          /* Reels still spinning */
+          <button className="btn-neon btn-primary w-full" disabled>
+            <svg className="animate-spin" width="18" height="18" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" fill="none" opacity="0.25" />
+              <path fill="currentColor" opacity="0.85" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z" />
+            </svg>
+            Spinning…
           </button>
         )}
       </div>

@@ -1,54 +1,135 @@
-# SpinDeck — DJ-deck redesign drop-in
+# SpinDeck 🎛️
 
-These files port the design from `SpinDeck Redesign.html` into your actual repo
-(`client/` of `github.com/CodeByMAB/spindeck`). All store hooks, WebSocket
-plumbing, and prop signatures are preserved — only the JSX + styles change.
+> A collaborative Spotify queue app — create a room, share the PIN, and let everyone add tracks.
 
-## Files in this folder
+## What It Is
+
+SpinDeck lets you create a shared music experience. Host starts a room, gets a 4-digit PIN, and shares it with friends. Anyone can search Spotify, add tracks to the queue, and see the queue update in real-time. Host controls playback, guests can skip-vote.
+
+## Features
+
+- **Room Creation** — Host creates a room and gets a shareable 4-digit PIN
+- **Numpad Join** — Guests enter the PIN to join (mobile-friendly)
+- **Real-time Sync** — WebSocket-powered queue, playback state, and skip votes
+- **QR Join** — Scan a QR code to instantly join a room
+- **PWA Ready** — Installable on mobile (with offline support)
+- **Skip Voting** — Guests can vote to skip; threshold-based skip triggers
+
+## Tech Stack
+
+### Client
+- **React 18** — UI framework
+- **Vite** — Build tool + PWA plugin
+- **Zustand** — State management
+- **Tailwind CSS** — Styling with custom neon palette
+- **qrcode.react** — QR code generation
+
+### Server
+- **Fastify** — Node.js web framework
+- **@fastify/websocket** — Real-time room management
+- **@fastify/cors** — Cross-origin requests
+- **UUID** — Room ID generation
+
+## Project Structure
 
 ```
-repo/client/
-├── index.html                    # adds Google Fonts (Space Grotesk + JetBrains Mono + Inter)
-├── tailwind.config.js            # new neon palette + brand fonts + animations
-└── src/
-    ├── index.css                 # SpinDeck custom layer (vinyl, PIN cells, neon buttons, waveform…)
-    └── components/
-        ├── Brand.jsx             # NEW — Wordmark, VinylDisc, Waveform, PinDisplay, EqBars
-        ├── HomeScreen.jsx
-        ├── CreateRoomScreen.jsx
-        ├── JoinRoomScreen.jsx    # now with numpad PIN entry
-        ├── RoomScreen.jsx
-        ├── NowPlaying.jsx        # split into HostDeck (vinyl + transport) + GuestDeck (skip meter)
-        ├── QueueList.jsx
-        ├── SearchModal.jsx
-        └── UserList.jsx
+social-jukebox/
+├── client/                 # React frontend
+│   ├── src/
+│   │   ├── components/    # UI components (Room, Queue, Search, etc.)
+│   │   ├── stores/        # Zustand state stores
+│   │   ├── hooks/         # Custom React hooks
+│   │   ├── utils/         # Helpers
+│   │   ├── App.jsx        # Main app component
+│   │   └── index.css      # Tailwind + custom styles
+│   ├── index.html
+│   ├── tailwind.config.js # Neon palette + animations
+│   └── vite.config.js     # PWA config
+│
+├── server/                 # Fastify backend
+│   ├── server.js          # WebSocket + REST endpoints
+│   └── .env               # Environment config
+│
+└── docs/
+    ├── SRS.md             # Software Requirements Specification
+    └── BRS.md             # Business Requirements Specification
 ```
 
-## To apply
+## Getting Started
+
+### Prerequisites
+
+- Node.js 18+
+- Spotify Developer account (for API credentials)
+
+### Setup
 
 ```bash
-# from your repo root
-cp -r /path/to/repo/client/* ./client/
+# Clone the repo
+git clone https://github.com/CodeByMAB/spindeck.git
+cd spindeck
+
+# Install client dependencies
+cd client && npm install
+
+# Install server dependencies
+cd ../server && npm install
+
+# Configure Spotify credentials
+cp server/.env.example server/.env
+# Edit .env with your Spotify API keys
 ```
 
-No new dependencies. Tailwind already in your stack picks up the new tokens
-from `tailwind.config.js`.
+### Running
 
-The Google Fonts link in `index.html` loads three families:
-- **Space Grotesk** — display headings
+```bash
+# Terminal 1: Start the server
+cd server
+npm run dev    # or: npm start
+
+# Terminal 2: Start the client
+cd client
+npm run dev
+```
+
+The client runs at `http://localhost:5173` by default.
+
+## Design System
+
+### Typography
+- **Space Grotesk** — Display headings
 - **JetBrains Mono** — PIN cells, BPM, timecodes
-- **Inter** — body
+- **Inter** — Body text
 
-## What changed structurally
+### Theme
+Custom neon palette with dark base — vinyl textures, glowing buttons, waveform animations. The vinyl disc rotates during playback; album art drops into the center label.
 
-- `App.jsx`, `stores/useStore.js` — **unchanged**, no edits needed.
-- `Brand.jsx` is new. All screens import shared primitives from it.
-- `NowPlaying.jsx` is now ~split: `<HostDeck>` (large vinyl + transport + waveform) and `<GuestDeck>` (compact deck + animated skip-vote meter). The hidden YouTube IFrame still drives audio — added a 500ms tick to update `elapsed` so the waveform fills in real time.
-- `JoinRoomScreen.jsx` ditches the text input for a proper numpad — keeps the same `joinRoom(pin)` call.
+## API
 
-## Notes / next steps
+### WebSocket Events
 
-- The vinyl rotates while `isPlaying`. Album art (`track.thumbnail`) drops into the center label cleanly; if it's missing you get a striped placeholder with the track name in monospace.
-- `track.addedBy` shows as a chip on each queue row — if your server doesn't emit that, the chip simply doesn't render. Add the field server-side to light it up.
-- BPM badge in the host deck is currently a static play/pause indicator. Wire it to a real BPM source if/when you add audio analysis.
-- The "Share Link" button uses `navigator.share` with `navigator.clipboard` as fallback.
+| Event | Direction | Payload |
+|-------|-----------|---------|
+| `create-room` | client → server | `{ hostId }` |
+| `room-created` | server → client | `{ roomId, pin }` |
+| `join-room` | client → server | `{ pin }` |
+| `room-joined` | server → client | `{ room, tracks, users }` |
+| `add-track` | client → server | `{ roomId, track }` |
+| `track-added` | server → client | `{ track }` |
+| `skip-vote` | client → server | `{ roomId, trackId }` |
+| `track-skipped` | server → client | `{ trackId }` |
+| `playback-update` | bidirectional | `{ isPlaying, elapsed }` |
+
+### REST Endpoints
+
+- `GET /health` — Server health check
+- `GET /room/:pin` — Get room state by PIN
+- `POST /search` — Spotify search proxy
+
+## License
+
+MIT
+
+---
+
+*Built by MAB — Naples, FL* 🦀
